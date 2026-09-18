@@ -47,8 +47,11 @@ export class FeedbackKit {
   match() { this.hum([660, 880], 0.16, 0.09); this.tap([18, 40, 18]); }
   booster() { this.hum([740, 988], 0.14, 0.07); this.tap([24, 40, 24]); }
   slot() { this.hum([523, 784], 0.18, 0.08); this.tap([10, 30, 10]); }
+  hint() { this.hum([880, 1174], 0.12, 0.06); this.tap([10]); }
+  deny() { this.hum([240], 0.09, 0.05); this.tap([8, 40, 8]); }
+  warn() { this.hum([440, 349], 0.2, 0.06); this.tap([12, 60, 12]); }
   fail() { this.hum([300, 210], 0.24, 0.06); this.tap([26, 60, 26]); }
-  win() { this.hum([523, 659, 784, 1047], 0.18, 0.09); this.tap([14, 40, 14, 40, 28]); }
+  win() { this.hum([523, 659, 784, 1047, 1319], 0.2, 0.09); this.tap([14, 40, 14, 40, 28]); }
   silence() { try { void this.context?.close(); } catch { /* already closed */ } this.context = null; }
 }
 

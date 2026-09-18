@@ -84,6 +84,54 @@ describe("tile matching rules", () => {
     expect(planMove(game, "berry-2")!.result.status).toBe("lost");
   });
 
+  it("clears a triple landing in the seventh slot before any loss check", () => {
+    const game: GameState = {
+      board: [makeTile("sun-3", "sun"), makeTile("berry-2", "berry")],
+      tray: [
+        makeTile("sun-1", "sun"),
+        makeTile("sun-2", "sun"),
+        makeTile("leaf-1", "leaf"),
+        makeTile("leaf-2", "leaf"),
+        makeTile("drop-1", "drop"),
+        makeTile("berry-1", "berry"),
+      ],
+      status: "playing",
+      capacity: 7,
+    };
+
+    const move = planMove(game, "sun-3")!;
+
+    expect(move.arrival.tray).toHaveLength(7);
+    expect(move.result.tray.map((tile) => tile.id)).toEqual([
+      "leaf-1",
+      "leaf-2",
+      "drop-1",
+      "berry-1",
+    ]);
+    expect(move.result.status).toBe("playing");
+  });
+
+  it("loses when the seventh slot fills without a triple", () => {
+    const game: GameState = {
+      board: [makeTile("moon-1", "moon")],
+      tray: [
+        makeTile("sun-1", "sun"),
+        makeTile("leaf-1", "leaf"),
+        makeTile("drop-1", "drop"),
+        makeTile("berry-1", "berry"),
+        makeTile("star-1", "star"),
+        makeTile("heart-1", "heart"),
+      ],
+      status: "playing",
+      capacity: 7,
+    };
+
+    const move = planMove(game, "moon-1")!;
+
+    expect(move.arrival.tray).toHaveLength(7);
+    expect(move.result.status).toBe("lost");
+  });
+
   it("cannot select the same tile twice", () => {
     const next = planMove(createGame(), "t0")!.result;
 

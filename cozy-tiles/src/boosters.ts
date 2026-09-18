@@ -1,4 +1,4 @@
-import { capacityOf, planMove, resolveState, TILE_KINDS } from "./game";
+import { capacityOf, PALETTE, planMove, resolveState, TILE_KINDS, WILD_KIND } from "./game";
 import type { GameState, TileKind } from "./game";
 
 export const BOOSTERS = {
@@ -17,7 +17,25 @@ export function wand(state: GameState): GameState | null {
   const kinds = [...TILE_KINDS].sort((a, b) =>
     state.tray.filter((t) => t.kind === b).length - state.tray.filter((t) => t.kind === a).length);
   const kind = kinds.find((k) => all.filter((t) => t.kind === k).length >= 3);
-  if (!kind) return null;
+
+  if (!kind) {
+    // A rainbow plus a pair is also a triple, which the same-kind pass misses.
+    const wild = all.find((t) => t.kind === WILD_KIND);
+    const pair = PALETTE.find(
+      (candidate) => state.tray.filter((t) => t.kind === candidate).length === 2,
+    );
+    if (!wild || !pair) return null;
+    const rainbowIds = new Set([
+      ...state.tray.filter((t) => t.kind === pair).map((t) => t.id),
+      wild.id,
+    ]);
+    return resolveState({
+      ...state,
+      board: state.board.filter((t) => !rainbowIds.has(t.id)),
+      tray: state.tray.filter((t) => !rainbowIds.has(t.id)),
+    });
+  }
+
   const ids = new Set(all.filter((t) => t.kind === kind).slice(0, 3).map((t) => t.id));
   return resolveState({ ...state, board: state.board.filter((t) => !ids.has(t.id)), tray: state.tray.filter((t) => !ids.has(t.id)) });
 }

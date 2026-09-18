@@ -91,7 +91,7 @@ describe("saved progress", () => {
   it("rejects malformed, incompatible and illegal histories", () => {
     const invalid = [
       "{", "null", "[]", " ".repeat(16385), encoded(0), encoded(1.5),
-      encoded(MAX_LEVEL + 1), encoded("1"), encoded(1, [], 2), encoded(1, [], 1, 2),
+      encoded(MAX_LEVEL + 1), encoded("1"), encoded(1, [], 2), encoded(1, [], 1, GENERATOR_VERSION + 1),
       encoded(1, "t0"), encoded(1, [123]), encoded(1, ["missing"]),
       encoded(1, ["b0"]), encoded(1, ["t0", "t0"]),
       encoded(1, Array(13).fill("t0")),

@@ -1,9 +1,18 @@
 export const TILE_KINDS = [
   "sun", "leaf", "drop", "berry", "moon", "star", "heart", "flower",
   "apple", "orange", "cherry", "mushroom", "fish", "butterfly", "gem", "cup",
+  "cloud", "bell", "honey", "acorn", "wild",
 ] as const;
 
 export type TileKind = (typeof TILE_KINDS)[number];
+
+/** Matches any pair of one kind, and clears as a triple with two more wilds. */
+export const WILD_KIND: TileKind = "wild";
+
+/** Every symbol that can be assigned as an ordinary group of three. */
+export const PALETTE: TileKind[] = TILE_KINDS.filter(
+  (kind) => kind !== WILD_KIND,
+);
 
 // Tile-face size in board units. Shadows never participate in blocking.
 export const TILE_FACE = 0.92;
@@ -168,6 +177,76 @@ export function isSelectable(state: GameState, id: string): boolean {
   );
 }
 
+/**
+ * The single matching rule, shared by the engine, the save validator, the
+ * boosters, and hints so they can never disagree:
+ *
+ * - three of one kind
+ * - two of one kind completed by a rainbow
+ * - one of a kind completed by two rainbows
+ * - three rainbows
+ *
+ * `tray` must already contain `insertedId`, and any returned triple always
+ * contains it, so callers can ask "would this pick clear anything?".
+ */
+export function findTriple(
+  tray: Tile[],
+  insertedId: string,
+  board: Tile[] = [],
+): string[] {
+  const inserted = tray.find((tile) => tile.id === insertedId);
+  if (!inserted) return [];
+
+  const same = tray.filter((tile) => tile.kind === inserted.kind);
+  if (same.length >= 3) return same.slice(0, 3).map((tile) => tile.id);
+
+  const wilds = tray.filter((tile) => tile.kind === WILD_KIND);
+
+  if (inserted.kind !== WILD_KIND) {
+    const needed = 3 - same.length;
+    if (wilds.length >= needed) {
+      return [
+        ...same.map((tile) => tile.id),
+        ...wilds.slice(0, needed).map((tile) => tile.id),
+      ];
+    }
+    return [];
+  }
+
+  // A rainbow spends itself on the pair with the most work left ahead of it,
+  // then on a lone symbol, then on other rainbows. Ties break by palette order
+  // so the choice is always the same for the same board.
+  const held = PALETTE.map((kind) => ({
+    kind,
+    tiles: tray.filter((tile) => tile.kind === kind),
+  })).sort((a, b) => {
+    const remaining = (kind: TileKind) =>
+      board.filter((tile) => tile.kind === kind).length;
+    return (
+      remaining(b.kind) - remaining(a.kind) ||
+      PALETTE.indexOf(a.kind) - PALETTE.indexOf(b.kind)
+    );
+  });
+
+  const others = wilds.filter((tile) => tile.id !== insertedId);
+  const pair = held.find((entry) => entry.tiles.length === 2);
+  if (pair) return [...pair.tiles.map((tile) => tile.id), insertedId];
+
+  const lone = held.find((entry) => entry.tiles.length === 1);
+  if (lone && others.length >= 1) {
+    return [lone.tiles[0].id, insertedId, others[0].id];
+  }
+
+  return others.length >= 2
+    ? [insertedId, ...others.slice(0, 2).map((tile) => tile.id)]
+    : [];
+}
+
+/** True when the tray already holds something that must have cleared. */
+export function holdsTriple(tray: Tile[]): boolean {
+  return tray.some((tile) => findTriple(tray, tile.id).length > 0);
+}
+
 export function planMove(state: GameState, id: string): Move | null {
   if (!isSelectable(state, id)) return null;
 
@@ -187,10 +266,7 @@ export function planMove(state: GameState, id: string): Move | null {
   const tray = [...state.tray];
   tray.splice(insertionIndex, 0, tile);
 
-  const sameKind = tray.filter((item) => item.kind === tile.kind);
-
-  const matchingIds =
-    sameKind.length >= 3 ? sameKind.slice(0, 3).map((item) => item.id) : [];
+  const matchingIds = findTriple(tray, tile.id, board);
 
   const remainingTray = tray.filter((item) => !matchingIds.includes(item.id));
 

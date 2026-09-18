@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planMove, TILE_FACE, TILE_KINDS } from "./game";
-import { boardBounds, covers, difficultyFor, generateLevel, MAX_LEVEL } from "./levels";
+import { boardBounds, chapterLevels, chapterOf, covers, difficultyFor, generateLevel, MAX_LEVEL } from "./levels";
 import { EXTRA_SYMBOLS, LABELS } from "./symbols";
 
 describe("generated levels", () => {
@@ -35,6 +35,22 @@ describe("generated levels", () => {
     },
   );
 
+  it("pages levels into chapters that never pass the last level", () => {
+    expect(chapterOf(1)).toBe(1);
+    expect(chapterOf(20)).toBe(1);
+    expect(chapterOf(21)).toBe(2);
+    expect(chapterLevels(1)).toEqual([...Array.from({ length: 20 }, (_, i) => i + 1)]);
+
+    const final = chapterLevels(chapterOf(MAX_LEVEL));
+    expect(final).toHaveLength(20);
+    expect(final[final.length - 1]).toBe(MAX_LEVEL);
+
+    expect(chapterLevels(20_000_000)).toHaveLength(20);
+    expect(chapterLevels(chapterOf(MAX_LEVEL) + 1)).toEqual([]);
+    expect(() => chapterOf(0)).toThrow();
+    expect(() => chapterLevels(0)).toThrow();
+  });
+
   it("rejects invalid level numbers", () => {
     for (const value of [0, -1, NaN, Infinity, 1.5, MAX_LEVEL + 1]) {
       expect(() => generateLevel(value)).toThrow();
@@ -48,6 +64,29 @@ describe("generated levels", () => {
     expect(difficultyFor(31).tiles).toBe(48);
     expect(difficultyFor(31).layers).toBe(6);
     expect(new Set(generateLevel(31).game.board.map((tile) => tile.kind)).size).toBe(16);
+  });
+
+  it("varies late levels instead of repeating one hardest recipe", () => {
+    const signature = (level: number) => {
+      const d = difficultyFor(level);
+      return `${d.shape}/${d.tiles}/${d.layers}/${d.kinds}`;
+    };
+
+    // Level 31 stays the original hardest rectangle.
+    expect(signature(31)).toBe("rectangle/48/6/16");
+
+    const late = Array.from({ length: 12 }, (_, i) => signature(32 + i));
+    expect(new Set(late).size).toBeGreaterThanOrEqual(6);
+    expect(signature(32)).not.toBe(signature(33));
+  });
+
+  it("rotates every silhouette across late levels", () => {
+    const shapes = new Set<string>();
+    for (let level = 31; level < 91; level++) shapes.add(difficultyFor(level).shape);
+
+    for (const name of ["rectangle", "diamond", "arch", "ring", "cottage", "heart"]) {
+      expect(shapes).toContain(name);
+    }
   });
 
   it("does not block touching edges or side neighbors", () => {
