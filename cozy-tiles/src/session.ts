@@ -1,7 +1,7 @@
-import { capacityOf, planMove, resolveState } from "./game";
+import { capacityOf, isSolvable, planMove, resolveState } from "./game";
 import type { GameState } from "./game";
 import { generateDailyPuzzle, generateLevel, isLevelNumber, MAX_LEVEL } from "./levels";
-import { BOOSTERS, BOOSTER_ORDER, shuffle, wand } from "./boosters";
+import { BOOSTERS, BOOSTER_ORDER, shuffle, wand, wandStrands } from "./boosters";
 import type { Booster } from "./boosters";
 import { DAILY_COINS, dayNumber, isConsecutive, isDailyDate } from "./daily";
 
@@ -45,6 +45,8 @@ export type Session = {
   dailyStreak: number;
   dailyBestStreak: number;
   dailiesCleared: number;
+  /** The seventh tray slot, once bought. Permanent: it is never reset. */
+  seventhSlot: boolean;
 };
 export const WELCOME_COINS = 100;
 export const WIN_COINS = 20;
@@ -56,7 +58,13 @@ export function newSession(level = 1): Session {
     rewardedThrough: level - 1,
     settings: { sound: true, vibration: true, relaxed: false, autoAdvance: false },
     undo: [], shuffleCount: 0, revision: 0, rescues: 0, attempts: 0, usedBooster: false, stars: {},
-    daily: null, stash: null, lastDaily: null, dailyStreak: 0, dailyBestStreak: 0, dailiesCleared: 0 };
+    daily: null, stash: null, lastDaily: null, dailyStreak: 0, dailyBestStreak: 0, dailiesCleared: 0,
+    seventhSlot: false };
+}
+
+/** Applies the permanent seventh slot to a board, whatever its source. */
+function withSlots(game: GameState, seventhSlot: boolean): GameState {
+  return seventhSlot ? { ...game, capacity: 7 } : game;
 }
 
 /** The board an attempt starts from: a campaign level or a date's daily puzzle. */
@@ -106,6 +114,10 @@ function record(session: Session): Session {
 export function pick(session: Session, id: string) {
   const move = planMove(session.game, id);
   if (!move) return null;
+  // A clear that would leave the board unfinishable is refused the same way a
+  // covered tile is: a free-choice rainbow can shift a kind's count away from a
+  // multiple of three, and the leftovers would never match.
+  if (move.matchingIds.length > 0 && !isSolvable(move.result)) return null;
   const lost = move.result.status === "lost";
   const next = { ...session, game: move.result,
     undo: [...session.undo, session.game].slice(-UNDO_LIMIT),
@@ -128,8 +140,30 @@ export function rescue(session: Session, expectedRevision: number): { session: S
 }
 
 export function restartSession(session: Session): Session {
-  return { ...session, game: freshGame(session.level, session.daily), undo: [], shuffleCount: 0,
+  return { ...session,
+    game: withSlots(freshGame(session.level, session.daily), session.seventhSlot),
+    undo: [], shuffleCount: 0,
     rescues: 0, attempts: 0, usedBooster: false, revision: session.revision + 1 };
+}
+
+/** A live attempt whose remaining tiles can never match again. */
+export const stranded = (session: Session) =>
+  session.game.status === "playing" && !isSolvable(session.game);
+
+/**
+ * A save written before the fairness guard can hold a stranded position. Rewind
+ * to the newest playable frame so the player keeps their progress; if every
+ * frame is stranded, start the attempt over.
+ */
+export function recoverStranded(session: Session): Session {
+  if (!stranded(session)) return session;
+  for (let index = session.undo.length - 1; index >= 0; index--) {
+    if (!isSolvable(session.undo[index])) continue;
+    return { ...session,
+      game: resolveState({ ...session.undo[index], capacity: capacityOf(session.game) }),
+      undo: session.undo.slice(0, index), revision: session.revision + 1 };
+  }
+  return restartSession(session);
 }
 
 /** Enters a daily puzzle, setting the campaign attempt aside to restore later. */
@@ -139,7 +173,7 @@ export function startDaily(session: Session, date: string): Session {
   if (session.daily === date) return session;
   const stash = session.stash ?? attemptOf(session);
   return { ...session, daily: date, stash,
-    game: generateDailyPuzzle(dayNumber(date)).game,
+    game: withSlots(generateDailyPuzzle(dayNumber(date)).game, session.seventhSlot),
     undo: [], shuffleCount: 0, rescues: 0, attempts: 0, usedBooster: false,
     revision: session.revision + 1 };
 }
@@ -148,7 +182,9 @@ export function startDaily(session: Session, date: string): Session {
 export function exitDaily(session: Session): Session {
   if (!session.daily) return session;
   const restored = session.stash ?? attemptOf(newSession(session.level));
-  return { ...session, ...restored, daily: null, stash: null, revision: session.revision + 1 };
+  return { ...session, ...restored,
+    game: withSlots(restored.game, session.seventhSlot),
+    daily: null, stash: null, revision: session.revision + 1 };
 }
 
 export function advanceSession(session: Session): Session {
@@ -178,7 +214,9 @@ export function unavailable(session: Session, action: Booster): string {
   if (session.game.status === "won") return "This level is complete.";
   if (action === "skip" && session.daily) return "Skip is for campaign levels.";
   if (session.level < BOOSTERS[action].unlock) return `Unlocks at level ${BOOSTERS[action].unlock}.`;
-  if (action === "slot" && capacityOf(session.game) === 7) return "The seventh slot is already open.";
+  if (action === "slot" && (session.seventhSlot || capacityOf(session.game) === 7)) {
+    return "The seventh slot is already open.";
+  }
   if (action === "undo" && !session.undo.length) return "No ordinary picks to undo.";
   if (action === "shuffle" && session.game.status !== "playing") return "Open a slot, undo, or use the wand first.";
   if (action === "shuffle" && (session.game.goal || session.game.limit)) {
@@ -194,14 +232,23 @@ export function purchase(session: Session, action: Booster, expectedRevision: nu
   const reason = unavailable(session, action);
   if (reason) return { session, error: reason };
   let next = { ...session, coins: session.coins - price(session, action), revision: session.revision + 1 };
-  if (action === "slot") next.game = resolveState({ ...session.game, capacity: 7 });
+  if (action === "slot") {
+    // Permanent: the flag survives retries, later levels, and app closes, so the
+    // upgrade is never sold twice and the option never returns.
+    next.seventhSlot = true;
+    next.game = resolveState(withSlots(session.game, true));
+  }
   if (action === "undo") {
     next.game = resolveState({ ...session.undo.at(-1)!, capacity: capacityOf(session.game) });
     next.undo = session.undo.slice(0, -1);
   }
   if (action === "wand") {
     const game = wand(session.game);
-    if (!game) return { session, error: "No triple is available. No coins spent." };
+    if (!game) {
+      return { session, error: wandStrands(session.game)
+        ? "That triple would leave tiles that can never match. No coins spent."
+        : "No triple is available. No coins spent." };
+    }
     next.game = game;
     next.undo = [];
   }

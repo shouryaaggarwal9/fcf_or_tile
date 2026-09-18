@@ -1,8 +1,8 @@
-import { capacityOf, frozenCount, PALETTE, planMove, resolveState, TILE_KINDS, WILD_KIND } from "./game";
+import { capacityOf, frozenCount, isSolvable, PALETTE, planMove, resolveState, TILE_KINDS, WILD_KIND } from "./game";
 import type { GameState, TileKind } from "./game";
 
 export const BOOSTERS = {
-  slot: { label: "Seventh slot", price: 40, unlock: 1, description: "Open one extra tray slot for this attempt. Retry or next level resets it." },
+  slot: { label: "Seventh slot", price: 40, unlock: 1, description: "Permanently open a seventh tray slot. Once bought, it stays open on every level and is never offered again." },
   undo: { label: "Undo", price: 20, unlock: 1, description: "Restore the board and tray before your last pick, including a cleared triple. Coins are not refunded." },
   shuffle: { label: "Shuffle", price: 40, unlock: 3, description: "Rearrange board symbols, keeping the tray. Only a verified solvable shuffle is accepted. Clears undo history." },
   wand: { label: "Wand", price: 60, unlock: 4, description: "Remove a matching triple, prioritizing the tray. Can collect covered tiles. Clears undo history." },
@@ -27,29 +27,50 @@ function clearTiles(state: GameState, ids: Set<string>): GameState {
   });
 }
 
-export function wand(state: GameState): GameState | null {
-  if (state.status === "won") return null;
+// The wand may not strand the player either: a rainbow clear shifts a kind's
+// count, so the result must still be finishable.
+function safeClear(state: GameState, ids: Set<string>): GameState | null {
+  const result = clearTiles(state, ids);
+  return result.status === "playing" && !isSolvable(result) ? null : result;
+}
+
+// Which tiles the wand would clear: the same-kind pass prefers whichever symbol
+// the tray holds most of, and otherwise a rainbow joins a held pair.
+function wandTargets(state: GameState): Set<string> | null {
   const all = [...state.tray, ...state.board];
   const kinds = [...TILE_KINDS].sort((a, b) =>
     state.tray.filter((t) => t.kind === b).length - state.tray.filter((t) => t.kind === a).length);
   const kind = kinds.find((k) => all.filter((t) => t.kind === k).length >= 3);
-
-  if (!kind) {
-    // A rainbow plus a pair is also a triple, which the same-kind pass misses.
-    const wild = all.find((t) => t.kind === WILD_KIND);
-    const pair = PALETTE.find(
-      (candidate) => state.tray.filter((t) => t.kind === candidate).length === 2,
-    );
-    if (!wild || !pair) return null;
-    const rainbowIds = new Set([
-      ...state.tray.filter((t) => t.kind === pair).map((t) => t.id),
-      wild.id,
-    ]);
-    return clearTiles(state, rainbowIds);
+  if (kind) {
+    return new Set(all.filter((t) => t.kind === kind).slice(0, 3).map((t) => t.id));
   }
 
-  const ids = new Set(all.filter((t) => t.kind === kind).slice(0, 3).map((t) => t.id));
-  return clearTiles(state, ids);
+  const wild = all.find((t) => t.kind === WILD_KIND);
+  const pair = PALETTE.find(
+    (candidate) => state.tray.filter((t) => t.kind === candidate).length === 2,
+  );
+  if (!wild || !pair) return null;
+  return new Set([
+    ...state.tray.filter((t) => t.kind === pair).map((t) => t.id),
+    wild.id,
+  ]);
+}
+
+export function wand(state: GameState): GameState | null {
+  if (state.status === "won") return null;
+  const ids = wandTargets(state);
+  return ids ? safeClear(state, ids) : null;
+}
+
+/**
+ * True when the wand is holding a triple it will not use, because clearing it
+ * would leave tiles that can never match. Worth naming, so the refusal does not
+ * look like the wand is broken.
+ */
+export function wandStrands(state: GameState): boolean {
+  if (state.status === "won") return false;
+  const ids = wandTargets(state);
+  return !!ids && !isSolvable(clearTiles(state, ids));
 }
 
 // Construct a continuation rather than running an unbounded puzzle search.

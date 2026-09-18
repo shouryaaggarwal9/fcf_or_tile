@@ -279,6 +279,57 @@ export function holdsTriple(tray: Tile[]): boolean {
   return tray.some((tile) => findTriple(tray, tile.id).length > 0);
 }
 
+/**
+ * Whether the tiles still in play can be partitioned into legal triples at all,
+ * ignoring coverage. It is a necessary condition for finishing the level, and it
+ * is exactly what a free-choice rainbow can break: spending one on a pair shifts
+ * that kind's count away from a multiple of three, so the leftovers may never
+ * match. With no rainbow in play, every kind must simply still be a multiple of
+ * three.
+ */
+export function isSolvable(state: GameState): boolean {
+  const tiles = [...state.board, ...state.tray];
+  const rainbows = tiles.filter((tile) => tile.kind === WILD_KIND).length;
+  const countOf = (kind: TileKind) => tiles.filter((tile) => tile.kind === kind).length;
+
+  if (rainbows === 0) return PALETTE.every((kind) => countOf(kind) % 3 === 0);
+
+  // Each kind clears as whole triples, as pairs paired with one rainbow, or as
+  // singles paired with two. Track the reachable totals of rainbows spent, then
+  // require the rest to clear as triples of rainbows.
+  let reachable = new Set<number>([0]);
+  for (const kind of PALETTE) {
+    const count = countOf(kind);
+    const costs = new Set<number>();
+    for (let paired = 0; paired <= count; paired++) {
+      if ((count - paired) % 3 !== 0) continue;
+      for (let pairs = 0; 2 * pairs <= paired; pairs++) {
+        costs.add(pairs + 2 * (paired - 2 * pairs));
+      }
+    }
+    const next = new Set<number>();
+    for (const used of reachable) {
+      for (const cost of costs) {
+        if (used + cost <= rainbows) next.add(used + cost);
+      }
+    }
+    reachable = next;
+    if (reachable.size === 0) return false;
+  }
+  return [...reachable].some((used) => (rainbows - used) % 3 === 0);
+}
+
+/**
+ * True when picking `id` would clear a triple and leave a position with no way
+ * to finish. Thaws and non-clearing picks never change the multiset, so they are
+ * always allowed.
+ */
+export function wouldStrand(state: GameState, id: string): boolean {
+  if (!isSelectable(state, id)) return false;
+  const move = planMove(state, id);
+  return !!move && move.matchingIds.length > 0 && !isSolvable(move.result);
+}
+
 export function planMove(state: GameState, id: string): Move | null {
   if (!isSelectable(state, id)) return null;
 

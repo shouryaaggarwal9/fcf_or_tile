@@ -51,7 +51,8 @@ The first new mechanic. A rainbow matches like a joker: it finishes any pair of 
 - **One rule, everywhere.** `findTriple` in `game.ts` is the only implementation of matching, and the engine, the save validator, the wand, and hints all call it. That is why they cannot drift apart.
 - **Taught in place.** The rainbow has its own symbol, a warm sheen on both board and tray, and the instruction line changes to "Rainbow tiles finish any pair" only while one is in play.
 - **Scheduled, not random.** Rainbows arrive as a whole triple — the first group of the witness — on every fourth level from 16, and as two triples from 60. Because a group of three rainbows is itself a legal triple, the level's witness keeps working and every level stays clearable.
-- **Wand support.** The wand's same-kind pass cannot see a rainbow finishing a pair, so it gained that path explicitly.
+- **Wand support.** The wand's same-kind pass cannot see a rainbow finishing a pair, so it gained that path explicitly. (Extended: a wand clear that would leave an unfinishable board is now refused — see `SLICE-9.md`.)
+- **The witness only proves a level can be finished, not that every legal line stays finishable.** A free-choice rainbow can shift a symbol's count away from a multiple of three and strand its leftovers. Since `SLICE-9.md`, cleaning up a stranding pick is refused.
 - **A stronger save invariant replaced a weaker one.** The validator no longer requires every kind to be a multiple of three (a rainbow breaks that), and instead requires the tile total to be a multiple of three and the tray to hold no completable triple. The second check is strictly better: it catches a match that was never resolved.
 
 ## Progression and feedback

@@ -119,15 +119,15 @@ describe("rainbow matching", () => {
   });
 
   it("lets the wand finish a pair with a rainbow", () => {
-    const game = state(
-      [makeTile("wild", "wild"), makeTile("berry-1", "berry"), makeTile("berry-2", "berry")],
-      [makeTile("sun-1", "sun"), makeTile("sun-2", "sun")],
-    );
+    // Two suns held plus the rainbow standing alone genuinely complete the level,
+    // so the wand is allowed to use it.
+    const game = state([makeTile("wild", "wild")], [makeTile("sun-1", "sun"), makeTile("sun-2", "sun")]);
 
     const cleared = wand(game)!;
 
     expect(cleared.tray).toHaveLength(0);
-    expect(cleared.board.map((tile) => tile.id)).toEqual(["berry-1", "berry-2"]);
+    expect(cleared.board).toHaveLength(0);
+    expect(cleared.status).toBe("won");
   });
 
   it("recognises every completable triple a tray could hold", () => {

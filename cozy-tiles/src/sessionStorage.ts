@@ -7,7 +7,7 @@ import { MAX_STARS, newSession, UNDO_LIMIT } from "./session";
 import type { Attempt, Session } from "./session";
 
 type StoragePort = Pick<Storage, "getItem" | "setItem">;
-const VERSION = 5;
+const VERSION = 6;
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid object");
   return value as Record<string, unknown>;
@@ -213,13 +213,19 @@ function finish(data: Record<string, unknown>, level: number): Omit<Session, "le
     throw new Error("Invalid daily reward state");
   }
 
+  // The seventh slot is now permanent. Saves written before the flag existed are
+  // honoured: an attempt with the slot already open keeps it for good.
+  const seventhSlot = data.seventhSlot === undefined
+    ? capacityOf(active.game) === 7
+    : flag(data.seventhSlot);
+
   return { ...active, coins: integer(data.coins), rewardedThrough,
     stars: validateStars(data.stars, level, rewardedThrough),
     revision: integer(data.revision),
     settings: { sound: settings.sound as boolean, vibration: settings.vibration as boolean,
       relaxed: settings.relaxed as boolean, autoAdvance: settings.autoAdvance === true },
     daily: daily as string | null, stash, lastDaily,
-    dailyStreak, dailyBestStreak, dailiesCleared };
+    dailyStreak, dailyBestStreak, dailiesCleared, seventhSlot };
 }
 
 export function decodeSession(raw: string): Session {
@@ -236,9 +242,9 @@ export function decodeSession(raw: string): Session {
     if (migrated.game.status === "won") migrated.rewardedThrough = migrated.level;
     return migrated;
   }
-  // Older versions predate rescue, attempt, star, daily, frozen, and objective
-  // tracking; the missing fields default on the way in.
-  if (![2, 3, 4, VERSION].includes(data.version as number) || data.generator !== GENERATOR_VERSION || !isLevelNumber(data.level)) {
+  // Older versions predate rescue, attempt, star, daily, frozen, objective, and
+  // permanent-slot tracking; the missing fields default on the way in.
+  if (![2, 3, 4, 5, VERSION].includes(data.version as number) || data.generator !== GENERATOR_VERSION || !isLevelNumber(data.level)) {
     throw new Error("Unsupported save");
   }
   return { level: data.level, ...finish(data, data.level) };

@@ -32,7 +32,8 @@ export function GameFooter({
   return (
     <footer className="game-footer">
       <div className="booster-bar">
-        {capacity === 6 && (
+        {/* Offered only until the upgrade is owned for good. */}
+        {capacity === 6 && !session.seventhSlot && (
           <button
             className="booster-button"
             onClick={() => onRequest("slot")}

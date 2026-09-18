@@ -51,6 +51,7 @@ export default function App() {
         movingId={tiles.movingId}
         hintId={tiles.hintId}
         onSelect={tiles.selectTile}
+        onBlocked={tiles.blocked}
       />
 
       <GameFooter

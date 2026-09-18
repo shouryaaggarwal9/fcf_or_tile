@@ -2,7 +2,7 @@
 import { capacityOf } from "./game";
 import type { Tile } from "./game";
 import { generateLevel, GENERATOR_VERSION, MAX_LEVEL } from "./levels";
-import { advanceSession, BOOSTERS, goToLevel, newSession, price, purchase, pick, rescue, rescueAvailable, restartSession, starsOf, UNDO_LIMIT, unlockedThrough, WELCOME_COINS, WIN_COINS } from "./session";
+import { advanceSession, BOOSTERS, goToLevel, newSession, price, purchase, pick, rescue, rescueAvailable, restartSession, starsOf, unavailable, UNDO_LIMIT, unlockedThrough, WELCOME_COINS, WIN_COINS } from "./session";
 import type { Session } from "./session";
 import { decodeSession, loadSession, saveSession } from "./sessionStorage";
 
@@ -36,15 +36,32 @@ function memoryStorage() {
 }
 
 describe("seventh slot", () => {
-  it("opens with coins for the current attempt and resets on retry", () => {
+  it("opens permanently and survives retry, later levels, and an app close", () => {
     const lost = lostState();
     expect(lost.game.status).toBe("lost");
     const next = purchase(lost, "slot", lost.revision).session;
     expect(capacityOf(next.game)).toBe(7);
     expect(next.game.status).toBe("playing");
     expect(next.coins).toBe(WELCOME_COINS - BOOSTERS.slot.price);
-    const retried = restartSession(next);
-    expect(capacityOf(retried.game)).toBe(6);
+    expect(next.seventhSlot).toBe(true);
+
+    // Permanent: a retry keeps it open...
+    expect(capacityOf(restartSession(next).game)).toBe(7);
+    // ...as does winning and advancing...
+    const advanced = advanceSession({ ...next, game: { ...next.game, status: "won" } });
+    expect(capacityOf(advanced.game)).toBe(7);
+    expect(advanced.seventhSlot).toBe(true);
+    // ...and a reload of a real board.
+    const bought = purchase(newSession(1), "slot", newSession(1).revision).session;
+    const storage = memoryStorage();
+    expect(saveSession(bought, storage)).toBe(true);
+    const loaded = loadSession(storage);
+    expect(loaded.warning).toBe("");
+    expect(loaded.session.seventhSlot).toBe(true);
+    expect(capacityOf(loaded.session.game)).toBe(7);
+
+    // The option never comes back, and it can never be bought twice.
+    expect(unavailable(restartSession(next), "slot")).toContain("already open");
   });
 
   it("rejects double purchase, stale confirmations and shortage", () => {
@@ -83,14 +100,31 @@ describe("boosters", () => {
   });
 
   it("wand removes a tray-preferring triple atomically", () => {
-    const session = lostState();
-    const board = session.game.board.map((t) => ({ ...t }));
-    board.push(makeTile("g", "leaf"), makeTile("h", "leaf"));
-    const withPair = { ...session, game: { ...session.game, board } };
-    const next = purchase(withPair, "wand", withPair.revision).session;
-    expect(next.game.board).toHaveLength(1);
-    expect(next.game.tray).toHaveLength(4);
+    // Leaf is held twice and standing once, so the wand prefers it and takes the
+    // third from the board. What is left (three suns, three drops) is solvable.
+    const tray = [makeTile("a", "leaf"), makeTile("b", "leaf")];
+    const board = [
+      makeTile("c", "leaf"),
+      makeTile("d", "sun"), makeTile("e", "sun"), makeTile("f", "sun"),
+      makeTile("g", "drop"), makeTile("h", "drop"), makeTile("i", "drop"),
+    ];
+    const session: Session = { ...newSession(4), game: { board, tray, status: "playing" } };
+    const next = purchase(session, "wand", session.revision).session;
+    expect(next.game.tray).toHaveLength(0);
+    expect(next.game.board.map((t) => t.id)).toEqual(["d", "e", "f", "g", "h", "i"]);
     expect(next.coins).toBe(WELCOME_COINS - BOOSTERS.wand.price);
+  });
+
+  it("wand is refused when the clear would strand the level", () => {
+    // 1 sun, 2 leaves and a rainbow: spending the rainbow on the leaves leaves a
+    // single sun that could never match. The wand must spend nothing.
+    const tray = [makeTile("a", "wild"), makeTile("b", "leaf"), makeTile("c", "leaf")];
+    const board = [makeTile("d", "sun")];
+    const session: Session = { ...newSession(4), game: { board, tray, status: "playing" } };
+    const refused = purchase(session, "wand", session.revision);
+    expect(refused.error).toContain("can never match");
+    expect(refused.session.coins).toBe(session.coins);
+    expect(refused.session.game.tray).toHaveLength(3);
   });
 
   it("wand is refused on a finished level and spends nothing", () => {

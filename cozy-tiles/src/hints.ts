@@ -1,4 +1,4 @@
-import { findTriple, isSelectable, planMove } from "./game";
+import { findTriple, isSelectable, planMove, wouldStrand } from "./game";
 import type { GameState } from "./game";
 import { generateLevel } from "./levels";
 import { puzzleFor } from "./daily";
@@ -46,10 +46,12 @@ export function hintFor(
 
   // Completing a trio strictly shrinks the tray, so it can never hurt. The
   // same check covers a rainbow finishing a pair.
+  // A hint must never suggest a pick that would strand the player.
   const completing = state.board.find(
     (tile) =>
       isSelectable(state, tile.id) &&
-      findTriple([...state.tray, tile], tile.id, state.board).length > 0,
+      findTriple([...state.tray, tile], tile.id, state.board).length > 0 &&
+      !wouldStrand(state, tile.id),
   );
   if (completing) return { id: completing.id, safe: true };
 
@@ -57,10 +59,11 @@ export function hintFor(
   const progressing = state.board.find(
     (tile) =>
       isSelectable(state, tile.id) &&
-      state.tray.some((held) => held.kind === tile.kind),
+      state.tray.some((held) => held.kind === tile.kind) &&
+      !wouldStrand(state, tile.id),
   );
   const fallback =
-    progressing ?? state.board.find((tile) => isSelectable(state, tile.id));
+    progressing ?? state.board.find((tile) => isSelectable(state, tile.id) && !wouldStrand(state, tile.id));
 
   return fallback ? { id: fallback.id, safe: false } : null;
 }

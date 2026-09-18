@@ -15,7 +15,7 @@ One-time welcome balance of 100 coins; the first completion of each level pays 2
 
 ## Seventh slot
 
-Six slots by default. Purchasing the seventh opens it for the current attempt, including across app closes; retry or the next level returns to six. A triple landing in the last slot clears safely before any loss check. When the tray fills without a match, the recovery dialog offers the seventh slot, undo, wand, and free retry — only eligible options appear.
+Six slots by default. Purchasing the seventh opens it for the current attempt, including across app closes; retry or the next level returns to six. (Superseded: the slot is now a permanent one-time unlock — see `SLICE-8.md`.) A triple landing in the last slot clears safely before any loss check. When the tray fills without a match, the recovery dialog offers the seventh slot, undo, wand, and free retry — only eligible options appear.
 
 ## Boosters (our rules, in this order)
 
