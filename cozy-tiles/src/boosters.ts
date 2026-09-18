@@ -1,4 +1,4 @@
-import { capacityOf, PALETTE, planMove, resolveState, TILE_KINDS, WILD_KIND } from "./game";
+import { capacityOf, frozenCount, PALETTE, planMove, resolveState, TILE_KINDS, WILD_KIND } from "./game";
 import type { GameState, TileKind } from "./game";
 
 export const BOOSTERS = {
@@ -10,6 +10,22 @@ export const BOOSTERS = {
 } as const;
 export type Booster = keyof typeof BOOSTERS;
 export const BOOSTER_ORDER: Booster[] = ["undo", "shuffle", "wand", "skip"];
+
+// Removing a triple counts target tiles toward a collect goal, so the wand can
+// never strand a level with an objective that has become unreachable.
+function clearTiles(state: GameState, ids: Set<string>): GameState {
+  const removed = [...state.tray, ...state.board].filter((tile) => ids.has(tile.id));
+  const goal = state.goal
+    ? { ...state.goal, collected: Math.min(state.goal.needed,
+        state.goal.collected + removed.filter((tile) => tile.kind === state.goal!.target).length) }
+    : undefined;
+  return resolveState({
+    ...state,
+    board: state.board.filter((t) => !ids.has(t.id)),
+    tray: state.tray.filter((t) => !ids.has(t.id)),
+    ...(goal ? { goal } : {}),
+  });
+}
 
 export function wand(state: GameState): GameState | null {
   if (state.status === "won") return null;
@@ -29,21 +45,19 @@ export function wand(state: GameState): GameState | null {
       ...state.tray.filter((t) => t.kind === pair).map((t) => t.id),
       wild.id,
     ]);
-    return resolveState({
-      ...state,
-      board: state.board.filter((t) => !rainbowIds.has(t.id)),
-      tray: state.tray.filter((t) => !rainbowIds.has(t.id)),
-    });
+    return clearTiles(state, rainbowIds);
   }
 
   const ids = new Set(all.filter((t) => t.kind === kind).slice(0, 3).map((t) => t.id));
-  return resolveState({ ...state, board: state.board.filter((t) => !ids.has(t.id)), tray: state.tray.filter((t) => !ids.has(t.id)) });
+  return clearTiles(state, ids);
 }
 
 // Construct a continuation rather than running an unbounded puzzle search.
 // First complete existing tray groups (pairs first), then board-only triples.
 export function shuffle(state: GameState, seed: number): { game: GameState; solution: string[] } | null {
-  if (state.status !== "playing" || state.board.length < 3) return null;
+  // Rearranging symbols cannot preserve a fixed objective or a spent move
+  // budget, so those levels simply do not offer a shuffle.
+  if (state.status !== "playing" || state.goal || state.limit || state.board.length < 3) return null;
   let randomState = seed >>> 0;
   const random = () => {
     randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0;
@@ -88,13 +102,16 @@ export function shuffle(state: GameState, seed: number): { game: GameState; solu
     const board = state.board.map((t) => ({ ...t, kind: assigned.get(t.id)! }));
     if (board.every((t, index) => t.kind === state.board[index].kind)) continue;
     const game = { ...state, board };
+    // A frozen tile is thawed and collected, so the witness visits it twice.
+    const witness = solution.flatMap((id) =>
+      frozenCount(state.board.find((tile) => tile.id === id)!) > 0 ? [id, id] : [id]);
     let verified = game;
-    for (const id of solution) {
+    for (const id of witness) {
       const move = planMove(verified, id);
       if (!move) return null;
       verified = move.result;
     }
-    if (verified.status === "won") return { game, solution };
+    if (verified.status === "won") return { game, solution: witness };
   }
   return null;
 }

@@ -4,6 +4,10 @@ type TopBarProps = {
   coins: number;
   gentle: boolean;
   busy: boolean;
+  /** Non-null while a daily puzzle is the active board. */
+  daily: string | null;
+  streak: number;
+  onOpenDaily: () => void;
   onOpenLevels: () => void;
   onOpenSettings: () => void;
 };
@@ -14,15 +18,24 @@ export function TopBar({
   coins,
   gentle,
   busy,
+  daily,
+  streak,
+  onOpenDaily,
   onOpenLevels,
   onOpenSettings,
 }: TopBarProps) {
   return (
     <header className="topbar">
       <div>
-        <p className="eyebrow">{chapter}</p>
-        <h1>Level {level}</h1>
-        {gentle && <span className="level-note">A gentle puzzle</span>}
+        <p className="eyebrow">{daily ? "Daily puzzle" : chapter}</p>
+        <h1>{daily ? "Daily puzzle" : `Level ${level}`}</h1>
+        {daily ? (
+          <span className="level-note">
+            {streak > 0 ? `${streak}-day streak` : "A new puzzle today"}
+          </span>
+        ) : (
+          gentle && <span className="level-note">A gentle puzzle</span>
+        )}
       </div>
 
       <div className="topbar-controls">
@@ -30,6 +43,19 @@ export function TopBar({
           <span aria-hidden="true">◎</span>{" "}
           {new Intl.NumberFormat().format(coins)}
         </span>
+        {streak > 0 && !daily && (
+          <span className="streak-chip" aria-label={`${streak}-day daily streak`}>
+            {streak}-day
+          </span>
+        )}
+        <button
+          className="quiet-button"
+          onClick={onOpenDaily}
+          aria-haspopup="dialog"
+          disabled={busy}
+        >
+          Daily
+        </button>
         <button
           className="quiet-button"
           onClick={onOpenLevels}

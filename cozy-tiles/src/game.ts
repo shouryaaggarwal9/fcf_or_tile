@@ -24,17 +24,29 @@ export type Tile = {
   y: number;
   layer: number;
   coveredBy: string[];
+  /** Picks still needed before it can be collected: 0 or 1. */
+  frozen?: number;
 };
+
+/** A collect objective: win once `collected` reaches `needed`. */
+export type Goal = { target: TileKind; needed: number; collected: number };
+
+/** A pick limit: lose if `used` reaches `limit` before the board clears. */
+export type MoveLimit = { limit: number; used: number };
 
 export type GameState = {
   board: Tile[];
   tray: Tile[];
   status: "playing" | "won" | "lost";
   capacity?: 6 | 7;
+  goal?: Goal;
+  limit?: MoveLimit;
 };
 
 export type Move = {
   tile: Tile;
+  /** True when this pick thawed a frozen tile instead of collecting it. */
+  thaw: boolean;
   insertionIndex: number;
   arrival: GameState;
   matchingIds: string[];
@@ -44,9 +56,29 @@ export type Move = {
 export const TRAY_CAPACITY = 6;
 export const capacityOf = (state: GameState) => state.capacity ?? TRAY_CAPACITY;
 
+export const frozenCount = (tile: Tile) => tile.frozen ?? 0;
+
+// Frost is removed rather than set to zero, so a thawed tile is identical to a
+// tile that never froze.
+function thawedTile(tile: Tile): Tile {
+  const copy = { ...tile };
+  delete copy.frozen;
+  return copy;
+}
+
+export function goalMet(state: GameState): boolean {
+  if (state.goal) return state.goal.collected >= state.goal.needed;
+  return state.board.length === 0 && state.tray.length === 0;
+}
+
+// A win always outranks a loss, so a final pick that both meets the goal and
+// fills the tray is a win. Clearing the triple first is why the tray is checked
+// after the goal.
 export function resolveState(state: GameState): GameState {
-  return { ...state, status: state.board.length === 0 && state.tray.length === 0
-    ? "won" : state.tray.length >= capacityOf(state) ? "lost" : "playing" };
+  if (goalMet(state)) return { ...state, status: "won" };
+  if (state.tray.length >= capacityOf(state)) return { ...state, status: "lost" };
+  if (state.limit && state.limit.used >= state.limit.limit) return { ...state, status: "lost" };
+  return { ...state, status: "playing" };
 }
 
 // Bottom tiles occupy two rows of four.
@@ -251,6 +283,27 @@ export function planMove(state: GameState, id: string): Move | null {
   if (!isSelectable(state, id)) return null;
 
   const tile = state.board.find((item) => item.id === id)!;
+  const limit = state.limit
+    ? { limit: state.limit.limit, used: state.limit.used + 1 }
+    : undefined;
+
+  // A frozen tile costs a pick to thaw: it stays put, so nothing reaches the
+  // tray and no coverage changes.
+  if (frozenCount(tile) > 0) {
+    const board = state.board.map((item) =>
+      item.id === id ? thawedTile(item) : item,
+    );
+    const thawed: GameState = { ...state, board, ...(limit ? { limit } : {}) };
+    return {
+      tile,
+      thaw: true,
+      insertionIndex: -1,
+      arrival: { ...thawed, status: "playing" },
+      matchingIds: [],
+      result: resolveState(thawed),
+    };
+  }
+
   const board = state.board.filter((item) => item.id !== id);
 
   // Insert after the last tile of the same kind.
@@ -270,29 +323,22 @@ export function planMove(state: GameState, id: string): Move | null {
 
   const remainingTray = tray.filter((item) => !matchingIds.includes(item.id));
 
-  // Resolve the triple BEFORE checking capacity.
-  const status: GameState["status"] =
-    board.length === 0 && remainingTray.length === 0
-      ? "won"
-      : remainingTray.length >= capacityOf(state)
-        ? "lost"
-        : "playing";
+  // A goal counts tiles as they leave the board, so help such as the wand can
+  // never strand a level with an unreachable objective.
+  const goal = state.goal && tile.kind === state.goal.target
+    ? { ...state.goal, collected: state.goal.collected + 1 }
+    : state.goal;
+
+  const earned: GameState = { ...state, board, tray,
+    ...(goal ? { goal } : {}), ...(limit ? { limit } : {}), status: "playing" };
 
   return {
     tile,
+    thaw: false,
     insertionIndex,
-    arrival: {
-      ...state,
-      board,
-      tray,
-      status: "playing",
-    },
+    arrival: earned,
     matchingIds,
-    result: {
-      ...state,
-      board,
-      tray: remainingTray,
-      status,
-    },
+    // Resolve the triple before the capacity and move-limit checks.
+    result: resolveState({ ...earned, tray: remainingTray }),
   };
 }

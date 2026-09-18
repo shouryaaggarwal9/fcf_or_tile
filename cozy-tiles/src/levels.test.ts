@@ -26,12 +26,19 @@ describe("generated levels", () => {
           Math.abs(other.x - tile.x) < TILE_FACE && Math.abs(other.y - tile.y) < TILE_FACE)).toBe(false);
       }
       for (const id of generated.solution) {
+        if (game.status !== "playing") break;
         const move = planMove(game, id);
         expect(move).not.toBeNull();
         expect(move!.arrival.tray.length).toBeLessThanOrEqual(3);
         game = move!.result;
       }
-      expect(game).toEqual({ board: [], tray: [], status: "won" });
+      expect(game.status).toBe("won");
+      // A collect goal can win with tiles still on the board; a plain clear
+      // (with or without a pick limit) always empties it.
+      if (!generated.game.goal) {
+        expect(game.board).toHaveLength(0);
+        expect(game.tray).toHaveLength(0);
+      }
     },
   );
 

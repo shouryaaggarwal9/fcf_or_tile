@@ -8,6 +8,10 @@ type GameFooterProps = {
   busy: boolean;
   notice: string;
   statusText: string;
+  /** The collect goal or moves left, or empty for a plain clear. */
+  objective: string;
+  /** True when a pick limit is nearly spent. */
+  urgent: boolean;
   onRequest: (action: Booster) => void;
   onHint: () => void;
   onRestart: () => void;
@@ -19,6 +23,8 @@ export function GameFooter({
   busy,
   notice,
   statusText,
+  objective,
+  urgent,
   onRequest,
   onHint,
   onRestart,
@@ -57,6 +63,12 @@ export function GameFooter({
           <span className="booster-price">Free</span>
         </button>
       </div>
+
+      {objective && (
+        <p className={`goal-line ${urgent ? "goal-line-warning" : ""}`}>
+          {objective}
+        </p>
+      )}
 
       <p role="status" aria-live="polite">
         {notice || statusText}

@@ -6,6 +6,7 @@ type SettingsDialogProps = {
   session: Session;
   onChange: (key: keyof Settings, value: boolean) => void;
   onReset: () => void;
+  onOpenStats: () => void;
   onClose: () => void;
 };
 
@@ -13,6 +14,7 @@ export function SettingsDialog({
   session,
   onChange,
   onReset,
+  onOpenStats,
   onClose,
 }: SettingsDialogProps) {
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -64,6 +66,9 @@ export function SettingsDialog({
         </>
       ) : (
         <div className="recovery-row">
+          <button className="quiet-button" onClick={onOpenStats}>
+            Stats & achievements
+          </button>
           <button
             className="quiet-button"
             onClick={() => setConfirmingReset(true)}

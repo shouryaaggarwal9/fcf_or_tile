@@ -8,6 +8,8 @@ type LostDialogProps = {
   capacity: number;
   canUndo: boolean;
   rescueAvailable: boolean;
+  /** How the attempt was lost: a full tray or a spent pick limit. */
+  reason: "slots" | "moves";
   onRequest: (action: Booster) => void;
   onRescue: () => void;
   onRestart: () => void;
@@ -18,6 +20,7 @@ export function LostDialog({
   capacity,
   canUndo,
   rescueAvailable,
+  reason,
   onRequest,
   onRescue,
   onRestart,
@@ -28,9 +31,13 @@ export function LostDialog({
         ↻
       </div>
       <h2 id="result-title" data-autofocus tabIndex={-1}>
-        Out of slots
+        {reason === "moves" ? "Out of moves" : "Out of slots"}
       </h2>
-      <p>Try clearing a triple before collecting other symbols.</p>
+      <p>
+        {reason === "moves"
+          ? "The picks ran out before the board cleared. Try again, or use the wand."
+          : "Try clearing a triple before collecting other symbols."}
+      </p>
       <div className="recovery-row">
         {/* Free options come first: getting stuck should never cost coins. */}
         {rescueAvailable && (

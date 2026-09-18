@@ -1,8 +1,9 @@
 import { capacityOf, planMove, resolveState } from "./game";
 import type { GameState } from "./game";
-import { generateLevel, isLevelNumber, MAX_LEVEL } from "./levels";
+import { generateDailyPuzzle, generateLevel, isLevelNumber, MAX_LEVEL } from "./levels";
 import { BOOSTERS, BOOSTER_ORDER, shuffle, wand } from "./boosters";
 import type { Booster } from "./boosters";
+import { DAILY_COINS, dayNumber, isConsecutive, isDailyDate } from "./daily";
 
 export { BOOSTERS, BOOSTER_ORDER };
 
@@ -13,6 +14,17 @@ export type Settings = {
   /** Skip the win dialog and move straight on. */
   autoAdvance: boolean;
 };
+/** The resumable part of an attempt, so a campaign board can be set aside
+ * intact while a daily puzzle is in play. */
+export type Attempt = {
+  game: GameState;
+  undo: GameState[];
+  shuffleCount: number;
+  rescues: number;
+  attempts: number;
+  usedBooster: boolean;
+};
+
 export type Session = {
   level: number; game: GameState; coins: number; rewardedThrough: number;
   settings: Settings; undo: GameState[]; shuffleCount: number; revision: number;
@@ -24,6 +36,15 @@ export type Session = {
   usedBooster: boolean;
   /** Best rating earned per cleared level. */
   stars: Record<number, number>;
+  /** The date of the daily puzzle currently on the board, or null in campaign. */
+  daily: string | null;
+  /** The campaign attempt set aside while a daily is in play. */
+  stash: Attempt | null;
+  /** The date of the most recently completed daily puzzle. */
+  lastDaily: string | null;
+  dailyStreak: number;
+  dailyBestStreak: number;
+  dailiesCleared: number;
 };
 export const WELCOME_COINS = 100;
 export const WIN_COINS = 20;
@@ -34,10 +55,30 @@ export function newSession(level = 1): Session {
   return { level, game: generateLevel(level).game, coins: WELCOME_COINS,
     rewardedThrough: level - 1,
     settings: { sound: true, vibration: true, relaxed: false, autoAdvance: false },
-    undo: [], shuffleCount: 0, revision: 0, rescues: 0, attempts: 0, usedBooster: false, stars: {} };
+    undo: [], shuffleCount: 0, revision: 0, rescues: 0, attempts: 0, usedBooster: false, stars: {},
+    daily: null, stash: null, lastDaily: null, dailyStreak: 0, dailyBestStreak: 0, dailiesCleared: 0 };
+}
+
+/** The board an attempt starts from: a campaign level or a date's daily puzzle. */
+function freshGame(level: number, daily: string | null): GameState {
+  return daily ? generateDailyPuzzle(dayNumber(daily)).game : generateLevel(level).game;
+}
+
+function attemptOf(session: Session): Attempt {
+  return { game: session.game, undo: session.undo, shuffleCount: session.shuffleCount,
+    rescues: session.rescues, attempts: session.attempts, usedBooster: session.usedBooster };
 }
 
 function reward(session: Session): Session {
+  if (session.daily) {
+    const date = session.daily;
+    // A completed daily pays once: refreshes and replays never re-reward.
+    if (session.game.status !== "won" || session.lastDaily === date) return session;
+    const streak = isConsecutive(session.lastDaily, date) ? session.dailyStreak + 1 : 1;
+    return { ...session, coins: session.coins + DAILY_COINS, lastDaily: date,
+      dailyStreak: streak, dailyBestStreak: Math.max(session.dailyBestStreak, streak),
+      dailiesCleared: session.dailiesCleared + 1 };
+  }
   if (session.game.status !== "won" || session.rewardedThrough >= session.level) return session;
   return { ...session, coins: session.coins + WIN_COINS, rewardedThrough: session.level };
 }
@@ -56,7 +97,8 @@ export const starsOf = (session: Session, level = session.level) =>
   session.stars[level] ?? 0;
 
 function record(session: Session): Session {
-  if (session.game.status !== "won") return session;
+  // Daily puzzles are a side challenge: they never touch campaign star ratings.
+  if (session.daily || session.game.status !== "won") return session;
   const best = Math.max(starsOf(session), starsFor(session));
   return { ...session, stars: { ...session.stars, [session.level]: best } };
 }
@@ -86,17 +128,37 @@ export function rescue(session: Session, expectedRevision: number): { session: S
 }
 
 export function restartSession(session: Session): Session {
-  return { ...session, game: generateLevel(session.level).game, undo: [], shuffleCount: 0,
+  return { ...session, game: freshGame(session.level, session.daily), undo: [], shuffleCount: 0,
     rescues: 0, attempts: 0, usedBooster: false, revision: session.revision + 1 };
 }
 
+/** Enters a daily puzzle, setting the campaign attempt aside to restore later. */
+export function startDaily(session: Session, date: string): Session {
+  if (!isDailyDate(date)) return session;
+  // Re-opening the same day resumes it; a rollover keeps the campaign stash.
+  if (session.daily === date) return session;
+  const stash = session.stash ?? attemptOf(session);
+  return { ...session, daily: date, stash,
+    game: generateDailyPuzzle(dayNumber(date)).game,
+    undo: [], shuffleCount: 0, rescues: 0, attempts: 0, usedBooster: false,
+    revision: session.revision + 1 };
+}
+
+/** Returns to the campaign attempt that was in progress before the daily. */
+export function exitDaily(session: Session): Session {
+  if (!session.daily) return session;
+  const restored = session.stash ?? attemptOf(newSession(session.level));
+  return { ...session, ...restored, daily: null, stash: null, revision: session.revision + 1 };
+}
+
 export function advanceSession(session: Session): Session {
-  if (session.game.status !== "won" || session.level >= MAX_LEVEL) return session;
+  if (session.daily || session.game.status !== "won" || session.level >= MAX_LEVEL) return session;
   return { ...restartSession({ ...session, level: session.level + 1 }), rewardedThrough: session.level };
 }
 
 export const winsOnItsOwn = (session: Session) =>
-  session.settings.autoAdvance && session.game.status === "won" && session.level < MAX_LEVEL;
+  !session.daily && session.settings.autoAdvance && session.game.status === "won" &&
+  session.level < MAX_LEVEL;
 
 // The map unlocks the next level as soon as the previous one is rewarded; a
 // level already completed stays replayable without paying again.
@@ -105,7 +167,7 @@ export const unlockedThrough = (session: Session) =>
 
 export function goToLevel(session: Session, level: number): Session | null {
   if (!isLevelNumber(level) || level > unlockedThrough(session)) return null;
-  return restartSession({ ...session, level });
+  return restartSession({ ...session, level, daily: null, stash: null });
 }
 
 export function price(session: Session, action: Booster) {
@@ -114,10 +176,14 @@ export function price(session: Session, action: Booster) {
 
 export function unavailable(session: Session, action: Booster): string {
   if (session.game.status === "won") return "This level is complete.";
+  if (action === "skip" && session.daily) return "Skip is for campaign levels.";
   if (session.level < BOOSTERS[action].unlock) return `Unlocks at level ${BOOSTERS[action].unlock}.`;
   if (action === "slot" && capacityOf(session.game) === 7) return "The seventh slot is already open.";
   if (action === "undo" && !session.undo.length) return "No ordinary picks to undo.";
   if (action === "shuffle" && session.game.status !== "playing") return "Open a slot, undo, or use the wand first.";
+  if (action === "shuffle" && (session.game.goal || session.game.limit)) {
+    return "Shuffle is not available on a collect or pick-limited level.";
+  }
   if (action === "skip" && session.level >= MAX_LEVEL) return "You have reached the last level.";
   if (session.coins < price(session, action)) return "Not enough coins. Retry is always free, or enable Relaxed Mode in settings.";
   return "";
@@ -140,7 +206,8 @@ export function purchase(session: Session, action: Booster, expectedRevision: nu
     next.undo = [];
   }
   if (action === "shuffle") {
-    const result = shuffle(session.game, session.level * 4099 + session.shuffleCount);
+    const base = session.daily ? dayNumber(session.daily) : session.level;
+    const result = shuffle(session.game, base * 4099 + session.shuffleCount);
     if (!result) return { session, error: "No changed, safe shuffle was found. No coins spent. Try undo or the wand." };
     next.game = result.game;
     next.undo = [];

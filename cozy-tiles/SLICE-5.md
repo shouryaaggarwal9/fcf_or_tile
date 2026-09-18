@@ -71,7 +71,7 @@ Save schema version 3 adds rescue, attempt, booster-use, and star tracking. Vers
 
 ## Not done yet
 
-Deliberately left for later, in rough value order: a date-seeded daily puzzle with a streak; a local stats/achievements screen; the next tile mechanics (frozen tiles that need two picks, and goal or pick-limited levels); Zen or endless mode; multi-tab conflict resolution beyond adoption; CI and Playwright coverage for install, offline, and update flows; and string extraction for localisation.
+Deliberately left for later, in rough value order: a date-seeded daily puzzle with a streak; a local stats/achievements screen; the next tile mechanics (frozen tiles that need two picks, and goal or pick-limited levels); Zen or endless mode; multi-tab conflict resolution beyond adoption; CI and Playwright coverage for install, offline, and update flows; and string extraction for localisation. The first two are built in `SLICE-6.md`.
 
 ## Phone acceptance checks
 

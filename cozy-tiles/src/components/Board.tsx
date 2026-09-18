@@ -61,18 +61,22 @@ export function Board({
     feedback.deny();
   }
 
-  // Rainbows only need explaining while one is actually in play.
+  // Rainbows and frost only need explaining while they are actually in play.
   const hasWild = [...game.board, ...game.tray].some(
     (tile) => tile.kind === WILD_KIND,
   );
+  const hasFrozen = game.board.some((tile) => (tile.frozen ?? 0) > 0);
+  const instruction = [
+    hasWild ? "Rainbow tiles finish any pair." : "",
+    hasFrozen ? "Frozen tiles thaw with one tap, then pick." : "",
+    "Only uncovered tiles can be picked.",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <section className="play-area" aria-label="Tile board">
-      <p className="instruction">
-        {hasWild
-          ? "Rainbow tiles finish any pair. Only uncovered tiles can be picked."
-          : "Only uncovered tiles can be picked."}
-      </p>
+      <p className="instruction">{instruction}</p>
 
       <div className="board-frame" ref={frame}>
         <div
@@ -84,6 +88,7 @@ export function Board({
         >
           {game.board.map((tile) => {
             const selectable = isSelectable(game, tile.id);
+            const frozen = (tile.frozen ?? 0) > 0;
 
             const style = {
               left: `${(tile.x / layout.width) * 100}%`,
@@ -102,16 +107,16 @@ export function Board({
                 data-kind={tile.kind}
                 style={style}
                 className={`tile board-tile ${!selectable ? "blocked" : ""} ${
-                  movingId === tile.id ? "leaving" : ""
-                } ${hintId === tile.id ? "hinted" : ""} ${
-                  deniedId === tile.id ? "denied" : ""
-                }`}
+                  frozen ? "frozen" : ""
+                } ${movingId === tile.id ? "leaving" : ""} ${
+                  hintId === tile.id ? "hinted" : ""
+                } ${deniedId === tile.id ? "denied" : ""}`}
                 // Blocked tiles stay tappable so a mis-tap can teach the rule;
                 // aria-disabled keeps that honest for assistive tech.
                 disabled={busy}
                 aria-disabled={!selectable}
                 aria-label={`${LABELS[tile.kind]}, ${
-                  selectable ? "available" : "covered"
+                  !selectable ? "covered" : frozen ? "frozen" : "available"
                 }`}
                 onClick={(event) => {
                   if (selectable) onSelect(tile.id, event.currentTarget);

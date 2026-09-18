@@ -1,6 +1,7 @@
 import { findTriple, isSelectable, planMove } from "./game";
 import type { GameState } from "./game";
 import { generateLevel } from "./levels";
+import { puzzleFor } from "./daily";
 
 export type Hint = { id: string; safe: boolean };
 
@@ -12,10 +13,17 @@ export type Hint = { id: string; safe: boolean };
  * Generation is deterministic, so the witness is recomputed on demand and never
  * has to be stored with the save.
  */
-export function hintFor(state: GameState, level: number): Hint | null {
+export function hintFor(
+  state: GameState,
+  level: number,
+  daily: string | null = null,
+): Hint | null {
   if (state.status !== "playing") return null;
 
-  const remaining = generateLevel(level).solution.filter((id) =>
+  // Generation stays deterministic, so the witness is recomputed on demand —
+  // from the daily seed when a daily puzzle is on the board.
+  const witness = daily ? puzzleFor(daily).solution : generateLevel(level).solution;
+  const remaining = witness.filter((id) =>
     state.board.some((tile) => tile.id === id),
   );
 

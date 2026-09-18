@@ -1,10 +1,11 @@
 import { createGame, PALETTE, planMove, TILE_FACE, WILD_KIND } from "./game";
-import type { GameState, Tile } from "./game";
+import type { GameState, Goal, MoveLimit, Tile } from "./game";
 
 export const MAX_LEVEL = 1_000_000_000;
-// Bumped whenever layout, shapes, or symbol assignment change: a saved board is
-// only valid against the generator that produced it.
-export const GENERATOR_VERSION = 3;
+// Bumped whenever layout, shapes, symbol assignment, frozen tiles, or objectives
+// change: a saved board is only valid against the generator that produced it.
+// Version 4 adds frozen tiles and collect / pick-limited objectives.
+export const GENERATOR_VERSION = 4;
 
 const DIFFICULTY = [
   { through: 3, kinds: 3, layers: 2, tiles: 12 },
@@ -122,7 +123,25 @@ export function difficultyFor(level: number) {
     gentle,
     shape,
     wilds,
+    frozen: frozenFor(level),
+    objective: objectiveFor(level),
   };
+}
+
+// Frost starts at level 11 and grows slowly; a gentle puzzle is never iced.
+export function frozenFor(level: number): number {
+  if (level < 11 || level % 8 === 0) return 0;
+  return Math.min(6, 2 + Math.floor((level - 11) / 4));
+}
+
+// Objectives begin after the first tier and never override a gentle level.
+// Odd multiples of three become collect goals, multiples of five become
+// pick-limited, and everything else is a plain clear.
+export function objectiveFor(level: number): ObjectiveKind {
+  if (level < 12 || level % 8 === 0) return "clear";
+  if (level % 3 === 0 && level % 2 === 1) return "collect";
+  if (level % 5 === 0) return "moves";
+  return "clear";
 }
 
 function seededRandom(seed: number) {
@@ -150,18 +169,26 @@ export function boardBounds(board: Tile[]): BoardBounds {
   };
 }
 
-export function generateLevel(level: number): { game: GameState; solution: string[] } {
-  const difficulty = difficultyFor(level);
-  // Preserve the personally verified tutorial and its original tile identities.
-  if (level === 1) {
-    return {
-      game: createGame(),
-      solution: ["t0", "t1", "b0", "t2", "t3", "b1", "b2", "b3", "b4", "b5", "b6", "b7"],
-    };
-  }
+// Every recipe the generator understands: campaign tiers and daily puzzles both
+// reduce to this shape, so the board builder has exactly one implementation.
+/** How a level can be won: clear the board, collect a target, or beat the clock. */
+export type ObjectiveKind = "clear" | "collect" | "moves";
 
-  const random = seededRandom(level);
-  const shape = SHAPES[difficulty.shape];
+export type Recipe = {
+  tiles: number;
+  layers: number;
+  kinds: number;
+  shape: ShapeName;
+  gentle: boolean;
+  wilds: number;
+  /** Tiles that must be thawed with one extra pick before they can be collected. */
+  frozen: number;
+  objective: ObjectiveKind;
+};
+
+function buildPuzzle(recipe: Recipe, seed: number): { game: GameState; solution: string[] } {
+  const random = seededRandom(seed);
+  const shape = SHAPES[recipe.shape];
   const candidates = shape.positions.map((position) => ({ ...position }));
   // Fill from the center outward, retaining a compact, readable silhouette.
   candidates.sort((a, b) => {
@@ -171,9 +198,9 @@ export function generateLevel(level: number): { game: GameState; solution: strin
   });
 
   const board: Tile[] = [];
-  for (let layer = 0; layer < difficulty.layers; layer++) {
-    const count = Math.floor(difficulty.tiles / difficulty.layers) +
-      (layer < difficulty.tiles % difficulty.layers ? 1 : 0);
+  for (let layer = 0; layer < recipe.layers; layer++) {
+    const count = Math.floor(recipe.tiles / recipe.layers) +
+      (layer < recipe.tiles % recipe.layers ? 1 : 0);
     for (let index = 0; index < count; index++) {
       const position = candidates[index];
       board.push({
@@ -214,21 +241,128 @@ export function generateLevel(level: number): { game: GameState; solution: strin
   // A rainbow group is still a legal triple, so the witness keeps working.
   const groups = Math.floor(board.length / 3);
   const wildGroups = new Set<number>();
-  if (difficulty.wilds > 0) wildGroups.add(0);
-  if (difficulty.wilds > 1) wildGroups.add(Math.floor(groups / 2));
+  if (recipe.wilds > 0) wildGroups.add(0);
+  if (recipe.wilds > 1) wildGroups.add(Math.floor(groups / 2));
   solution.forEach((id, index) => {
     const group = Math.floor(index / 3);
     board.find((tile) => tile.id === id)!.kind = wildGroups.has(group)
       ? WILD_KIND
-      : palette[group % difficulty.kinds];
+      : palette[group % recipe.kinds];
   });
-  const game: GameState = { board, tray: [], status: "playing" };
+
+  // Frost is chosen from its own stream, and thawing a tile never changes
+  // coverage, so the removal order still holds with a thaw inserted before each
+  // frozen tile's collection.
+  const frozenIds = new Set<string>();
+  const frostCount = Math.min(recipe.frozen, board.length);
+  if (frostCount > 0) {
+    const pickFrozen = seededRandom(hashSeed(`cozy-frozen-${seed}`));
+    const indices = new Set<number>();
+    while (indices.size < frostCount) indices.add(Math.floor(pickFrozen() * board.length));
+    for (const index of indices) frozenIds.add(board[index].id);
+    for (const tile of board) if (frozenIds.has(tile.id)) tile.frozen = 1;
+  }
+
+  // A collect goal names one symbol to gather. Its first group is placed near
+  // the middle of the witness, so the goal is a genuine shortcut — reachable
+  // before the board clears, but never from the opening picks. The pick limit
+  // leaves the witness room to recover.
+  const kindAt = (index: number) =>
+    board.find((tile) => tile.id === solution[index])!.kind;
+  const firstIndexOf = (kind: (typeof PALETTE)[number]) => {
+    for (let index = 0; index < solution.length; index++) {
+      if (kindAt(index) === kind) return index;
+    }
+    return -1;
+  };
+
+  let goal: Goal | undefined;
+  if (recipe.objective === "collect") {
+    const middle = groups / 2;
+    const target = PALETTE
+      .filter((kind) => board.some((tile) => tile.kind === kind))
+      .sort((a, b) =>
+        Math.abs(firstIndexOf(a) - middle) - Math.abs(firstIndexOf(b) - middle) ||
+        PALETTE.indexOf(a) - PALETTE.indexOf(b))[0];
+    goal = { target, needed: board.filter((tile) => tile.kind === target).length, collected: 0 };
+  }
+
+  // A frozen tile appears twice in the witness: a thaw, then its collection.
+  const witness: string[] = [];
+  for (const id of solution) witness.push(...(frozenIds.has(id) ? [id, id] : [id]));
+
+  let limit: MoveLimit | undefined;
+  if (recipe.objective === "moves") {
+    const slack = Math.max(5, Math.round(witness.length * 0.25));
+    limit = { limit: witness.length + slack, used: 0 };
+  }
+
+  const game: GameState = { board, tray: [], status: "playing",
+    ...(goal ? { goal } : {}), ...(limit ? { limit } : {}) };
   let verified = game;
-  for (const id of solution) {
+  for (const id of witness) {
     const move = planMove(verified, id);
     if (!move) throw new Error("Generated solution contains an illegal move");
     verified = move.result;
+    if (verified.status === "won") break;
   }
   if (verified.status !== "won") throw new Error("Generated level is not solvable");
-  return { game, solution };
+  return { game, solution: witness };
+}
+
+export function generateLevel(level: number): { game: GameState; solution: string[] } {
+  if (!isLevelNumber(level)) throw new Error("Invalid level number");
+  // Preserve the personally verified tutorial and its original tile identities.
+  if (level === 1) {
+    return {
+      game: createGame(),
+      solution: ["t0", "t1", "b0", "t2", "t3", "b1", "b2", "b3", "b4", "b5", "b6", "b7"],
+    };
+  }
+  return buildPuzzle(difficultyFor(level), level);
+}
+
+// Daily puzzles are generated from a calendar day, never from a level number, so
+// every player gets the same board on the same day. Recipes stay moderate — a
+// daily should feel like a treat, not the hardest level in the game.
+const DAILY_RECIPES = [
+  { tiles: 18, layers: 3, kinds: 6 },
+  { tiles: 24, layers: 3, kinds: 8 },
+  { tiles: 30, layers: 4, kinds: 10 },
+  { tiles: 36, layers: 4, kinds: 12 },
+  { tiles: 42, layers: 5, kinds: 14 },
+];
+
+const DAILY_SHAPES: ShapeName[] = ["rectangle", "diamond", "arch", "ring", "cottage", "heart"];
+
+function positiveMod(value: number, length: number) {
+  return ((value % length) + length) % length;
+}
+
+function hashSeed(text: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+export function dailyRecipe(day: number): Recipe {
+  if (!Number.isSafeInteger(day)) throw new Error("Invalid day number");
+  const base = DAILY_RECIPES[positiveMod(day, DAILY_RECIPES.length)];
+  return {
+    ...base,
+    shape: DAILY_SHAPES[positiveMod(day, DAILY_SHAPES.length)],
+    gentle: false,
+    // A rainbow day every eighth day, still arriving as a whole triple.
+    wilds: positiveMod(day, 8) === 0 ? 1 : 0,
+    // Dailies stay plain: no frost, no goal, no clock.
+    frozen: 0,
+    objective: "clear",
+  };
+}
+
+export function generateDailyPuzzle(day: number): { game: GameState; solution: string[] } {
+  return buildPuzzle(dailyRecipe(day), hashSeed(`cozy-daily-${day}`));
 }

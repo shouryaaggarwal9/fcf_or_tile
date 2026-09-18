@@ -1,12 +1,14 @@
 import { Board } from "./components/Board";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ConfirmPrompt } from "./components/ConfirmPrompt";
+import { DailyDialog } from "./components/DailyDialog";
 import { GameFooter } from "./components/GameFooter";
 import { LevelMap } from "./components/LevelMap";
 import { LostDialog } from "./components/LostDialog";
 import { PwaUpdate } from "./components/PwaUpdate";
 import { SaveWarning } from "./components/SaveWarning";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { StatsDialog } from "./components/StatsDialog";
 import { StatusChips } from "./components/StatusChips";
 import { TopBar } from "./components/TopBar";
 import { Tray } from "./components/Tray";
@@ -26,6 +28,9 @@ export default function App() {
         coins={tiles.session.coins}
         gentle={tiles.difficulty.gentle}
         busy={tiles.busy}
+        daily={tiles.session.daily}
+        streak={tiles.streak}
+        onOpenDaily={tiles.openDaily}
         onOpenLevels={tiles.openLevels}
         onOpenSettings={tiles.openSettings}
       />
@@ -54,6 +59,8 @@ export default function App() {
         busy={tiles.busy}
         notice={tiles.notice}
         statusText={tiles.statusText}
+        objective={tiles.objective}
+        urgent={tiles.urgent}
         onRequest={tiles.request}
         onHint={tiles.showHint}
         onRestart={tiles.requestRestart}
@@ -66,6 +73,7 @@ export default function App() {
           capacity={tiles.capacity}
           canUndo={tiles.canUndo}
           rescueAvailable={tiles.canRescue}
+          reason={tiles.lostByMoves ? "moves" : "slots"}
           onRequest={tiles.request}
           onRescue={tiles.rescue}
           onRestart={tiles.restart}
@@ -78,6 +86,7 @@ export default function App() {
           stars={tiles.stars}
           onAdvance={tiles.advance}
           onRestart={tiles.restart}
+          onExitDaily={tiles.leaveDaily}
         />
       )}
 
@@ -113,6 +122,7 @@ export default function App() {
           session={tiles.session}
           onChange={tiles.updateSetting}
           onReset={tiles.resetProgress}
+          onOpenStats={tiles.openStats}
           onClose={tiles.closeSettings}
         />
       )}
@@ -122,6 +132,27 @@ export default function App() {
           session={tiles.session}
           onSelect={tiles.selectLevel}
           onClose={tiles.closeLevels}
+        />
+      )}
+
+      {tiles.showDaily && (
+        <DailyDialog
+          session={tiles.session}
+          today={tiles.today}
+          streak={tiles.streak}
+          clearedToday={tiles.clearedToday}
+          onPlay={tiles.playDaily}
+          onLeave={tiles.leaveDaily}
+          onClose={tiles.closeDaily}
+        />
+      )}
+
+      {tiles.showStats && (
+        <StatsDialog
+          session={tiles.session}
+          streak={tiles.streak}
+          onOpenDaily={tiles.openDaily}
+          onClose={tiles.closeStats}
         />
       )}
 

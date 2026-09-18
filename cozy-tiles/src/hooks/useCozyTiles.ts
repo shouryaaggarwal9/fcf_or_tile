@@ -3,6 +3,7 @@ import { capacityOf } from "../game";
 import { boardBounds, difficultyFor } from "../levels";
 import {
   advanceSession,
+  exitDaily,
   goToLevel,
   newSession,
   pick,
@@ -11,6 +12,7 @@ import {
   rescue as rescueMove,
   rescueAvailable,
   restartSession,
+  startDaily,
   starsOf,
   unavailable,
   winsOnItsOwn,
@@ -18,7 +20,9 @@ import {
 import type { Session, Settings } from "../session";
 import { clearSession, decodeSession, loadSession, saveSession } from "../sessionStorage";
 import { SAVE_KEY } from "../progress";
+import { activeDailyStreak, dailyClearedToday, dailyDateOf } from "../daily";
 import { hintFor } from "../hints";
+import { LABELS } from "../symbols";
 import { feedback } from "../feedback";
 import type { Booster } from "../boosters";
 import { animateFlight, wait } from "../flight";
@@ -40,6 +44,8 @@ export function useCozyTiles() {
   const [notice, setNotice] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showLevels, setShowLevels] = useState(false);
+  const [showDaily, setShowDaily] = useState(false);
+  const [showStats, setShowStats] = useState(false);
   const [busy, setBusy] = useState(false);
   const [movingId, setMovingId] = useState<string | null>(null);
   const [matchingIds, setMatchingIds] = useState<string[]>([]);
@@ -135,6 +141,23 @@ export function useCozyTiles() {
     const picked = pick(session, id);
     if (!picked) return;
     const { move, session: next } = picked;
+
+    // A thaw is a state change, not a flight: the tile stays exactly where it is.
+    if (move.thaw) {
+      inputLocked.current = true;
+      commit(next);
+      setBusy(true);
+      setMovingId(null);
+      setHintId(null);
+      feedback.thaw();
+      try {
+        setGame(move.result);
+      } finally {
+        setBusy(false);
+        inputLocked.current = false;
+      }
+      return;
+    }
 
     inputLocked.current = true;
     // Persist the accepted move before animation; interruption resumes its result.
@@ -265,7 +288,7 @@ export function useCozyTiles() {
 
   function showHint() {
     if (inputLocked.current) return;
-    const hint = hintFor(session.game, session.level);
+    const hint = hintFor(session.game, session.level, session.daily);
     if (!hint) {
       setNotice("Nothing to suggest right now.");
       return;
@@ -294,18 +317,50 @@ export function useCozyTiles() {
     setShowSettings(false);
   }
 
+  function playDaily() {
+    if (inputLocked.current) return;
+    const next = startDaily(session, dailyDateOf());
+    if (next !== session) {
+      commit(next);
+      resetView(next);
+    }
+    setShowDaily(false);
+  }
+
+  function leaveDaily() {
+    if (inputLocked.current) return;
+    const next = exitDaily(session);
+    commit(next);
+    resetView(next);
+    setShowDaily(false);
+  }
+
   const difficulty = difficultyFor(session.level);
   const capacity = capacityOf(game);
   const lost = game.status === "lost";
   const canUndo = !unavailable(session, "undo");
   const canRescue = rescueAvailable(session);
+  const today = dailyDateOf();
+  const streak = activeDailyStreak(session.lastDaily, session.dailyStreak, today);
+  const clearedToday = dailyClearedToday(session.lastDaily, today);
+
+  const movesLeft = game.limit ? Math.max(0, game.limit.limit - game.limit.used) : null;
+  const objective = game.goal
+    ? `Collect ${Math.max(0, game.goal.needed - game.goal.collected)} more ${LABELS[game.goal.target]}`
+    : movesLeft !== null
+      ? `${movesLeft} move${movesLeft === 1 ? "" : "s"} left`
+      : "";
+  const urgent = movesLeft !== null && movesLeft <= 2;
+  const lostByMoves = game.status === "lost" && movesLeft === 0 && game.tray.length < capacity;
 
   const statusText =
     game.status === "won"
       ? "Level complete!"
       : game.status === "lost"
-        ? "Out of slots."
-        : `${game.board.length} tiles remaining. ${game.tray.length} of ${capacity} tray slots used.`;
+        ? lostByMoves
+          ? "Out of moves."
+          : "Out of slots."
+        : `${objective ? `${objective} · ` : ""}${game.board.length} tiles remaining. ${game.tray.length} of ${capacity} tray slots used.`;
 
   return {
     session,
@@ -329,7 +384,15 @@ export function useCozyTiles() {
     canRescue,
     stars: starsOf(session),
     statusText,
+    objective,
+    urgent,
+    lostByMoves,
     slots,
+    today,
+    streak,
+    clearedToday,
+    showDaily,
+    showStats,
     selectTile,
     restart,
     requestRestart,
@@ -341,6 +404,8 @@ export function useCozyTiles() {
     updateSetting,
     resetProgress,
     selectLevel,
+    playDaily,
+    leaveDaily,
     dismissSaveWarning: () => setSaveWarning(""),
     openLevels: () => setShowLevels(true),
     closeLevels: () => setShowLevels(false),
@@ -348,5 +413,16 @@ export function useCozyTiles() {
     cancelRestart: () => setConfirmRestart(false),
     openSettings: () => setShowSettings(true),
     closeSettings: () => setShowSettings(false),
+    // Only ever one auxiliary dialog at a time, so Escape cannot close two.
+    openDaily: () => {
+      setShowStats(false);
+      setShowDaily(true);
+    },
+    closeDaily: () => setShowDaily(false),
+    openStats: () => {
+      setShowSettings(false);
+      setShowStats(true);
+    },
+    closeStats: () => setShowStats(false),
   };
 }

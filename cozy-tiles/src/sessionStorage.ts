@@ -1,12 +1,13 @@
 import { capacityOf, holdsTriple, planMove, resolveState, TILE_KINDS } from "./game";
-import type { GameState, Tile } from "./game";
-import { generateLevel, GENERATOR_VERSION, isLevelNumber } from "./levels";
+import type { GameState, Goal, MoveLimit, Tile } from "./game";
+import { generateDailyPuzzle, generateLevel, GENERATOR_VERSION, isLevelNumber } from "./levels";
+import { dayNumber, isDailyDate } from "./daily";
 import { decodeProgress, SAVE_KEY } from "./progress";
 import { MAX_STARS, newSession, UNDO_LIMIT } from "./session";
-import type { Session } from "./session";
+import type { Attempt, Session } from "./session";
 
 type StoragePort = Pick<Storage, "getItem" | "setItem">;
-const VERSION = 3;
+const VERSION = 5;
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid object");
   return value as Record<string, unknown>;
@@ -20,6 +21,30 @@ function flag(value: unknown): boolean {
   return value;
 }
 
+function sameGoal(a?: Goal, b?: Goal): boolean {
+  if (!a || !b) return !a && !b;
+  return a.target === b.target && a.needed === b.needed && a.collected === b.collected;
+}
+
+function sameLimit(a?: MoveLimit, b?: MoveLimit): boolean {
+  if (!a || !b) return !a && !b;
+  return a.limit === b.limit && a.used === b.used;
+}
+
+function boardKey(board: Tile[]): string {
+  return board.map((tile) => `${tile.id}:${tile.kind}:${tile.frozen ?? 0}`).join(",");
+}
+
+// Two states are equal for validation when their board, tray, frost, progress,
+// and status match — never key order. Capacity is an attempt setting that can
+// legitimately differ between an old undo frame and the current game (buying the
+// seventh slot changes it), so it is not part of a move's identity.
+function sameGame(a: GameState, b: GameState): boolean {
+  return a.status === b.status &&
+    boardKey(a.board) === boardKey(b.board) && boardKey(a.tray) === boardKey(b.tray) &&
+    sameGoal(a.goal, b.goal) && sameLimit(a.limit, b.limit);
+}
+
 function validateGame(value: unknown, original: GameState): GameState {
   const data = record(value);
   if (!Array.isArray(data.board) || !Array.isArray(data.tray) ||
@@ -30,12 +55,42 @@ function validateGame(value: unknown, original: GameState): GameState {
     const base = original.board.find((tile) => tile.id === t.id);
     if (!base || ids.has(base.id) || t.x !== base.x || t.y !== base.y || t.layer !== base.layer ||
       JSON.stringify(t.coveredBy) !== JSON.stringify(base.coveredBy) || !TILE_KINDS.includes(t.kind as Tile["kind"])) throw new Error("Invalid tile");
+    // Frost only ever melts, so the saved count can never exceed the original.
+    const frozen = t.frozen ?? 0;
+    if (typeof frozen !== "number" || !Number.isInteger(frozen) || frozen < 0 || frozen > (base.frozen ?? 0)) {
+      throw new Error("Invalid frozen state");
+    }
     ids.add(base.id);
-    return { ...base, coveredBy: [...base.coveredBy], kind: t.kind as Tile["kind"] };
+    const tile: Tile = { id: base.id, kind: t.kind as Tile["kind"], x: base.x, y: base.y,
+      layer: base.layer, coveredBy: [...base.coveredBy] };
+    if (frozen > 0) tile.frozen = frozen;
+    return tile;
   });
+
+  // The objective is fixed by the level, so only its progress may differ.
+  const goalData = data.goal ?? null;
+  let goal: Goal | undefined;
+  if (original.goal) {
+    const saved = record(goalData ?? undefined);
+    if (saved.target !== original.goal.target || saved.needed !== original.goal.needed) {
+      throw new Error("Invalid goal");
+    }
+    goal = { target: original.goal.target, needed: original.goal.needed,
+      collected: integer(saved.collected, original.goal.needed) };
+  } else if (goalData) throw new Error("Unexpected goal");
+
+  const limitData = data.limit ?? null;
+  let limit: MoveLimit | undefined;
+  if (original.limit) {
+    const saved = record(limitData ?? undefined);
+    if (saved.limit !== original.limit.limit) throw new Error("Invalid move limit");
+    limit = { limit: original.limit.limit, used: integer(saved.used, original.limit.limit) };
+  } else if (limitData) throw new Error("Unexpected move limit");
+
   if (data.board.length + data.tray.length > original.board.length) throw new Error("Too many tiles");
   const game: GameState = { board: tiles(data.board), tray: tiles(data.tray), status: "playing",
-    ...(data.capacity === undefined ? {} : { capacity: data.capacity as 6 | 7 }) };
+    ...(data.capacity === undefined ? {} : { capacity: data.capacity as 6 | 7 }),
+    ...(goal ? { goal } : {}), ...(limit ? { limit } : {}) };
   if (game.tray.length > capacityOf(game)) throw new Error("Tray overflow");
   // Every move removes exactly three tiles, so the remainder is always a
   // multiple of three. Per-kind counts are not, because a rainbow can stand in
@@ -72,8 +127,64 @@ function validateStars(value: unknown, level: number, rewardedThrough: number): 
   return stars;
 }
 
+// Each frame must follow the last by exactly one legal pick — a collection or a
+// thaw — so a tampered save cannot smuggle in an impossible board.
+function plannedTransition(before: GameState, after: GameState, capacity: 6 | 7) {
+  const removed = before.board.filter((tile) => !after.board.some((other) => other.id === tile.id));
+  let id = removed.length === 1 ? removed[0].id : null;
+  if (!id) {
+    const melted = before.board.filter((tile) => {
+      const other = after.board.find((candidate) => candidate.id === tile.id);
+      return other && (tile.frozen ?? 0) !== (other.frozen ?? 0);
+    });
+    if (before.board.length === after.board.length && melted.length === 1) id = melted[0].id;
+  }
+  if (!id) return null;
+  const move = planMove({ ...before, capacity }, id);
+  return move && sameGame(move.result, after) ? move : null;
+}
+
+type AttemptFields = Pick<Session, "game" | "undo" | "shuffleCount" | "rescues" | "attempts" | "usedBooster">;
+
+// One attempt's game, undo history, and per-attempt counters, validated against
+// the board they were generated from. Used for both the active attempt and a
+// campaign attempt set aside behind a daily puzzle.
+function validateAttempt(data: Record<string, unknown>, original: GameState): AttemptFields {
+  if (!Array.isArray(data.undo) || data.undo.length > UNDO_LIMIT) throw new Error("Invalid undo history");
+  const game = validateGame(data.game, original);
+  const undo = data.undo.map((entry) => validateGame(entry, original));
+  // Every saved undo frame must lead to the next by exactly one ordinary pick.
+  const capacity = capacityOf(game);
+  for (let i = 0; i < undo.length; i++) {
+    const before = undo[i];
+    const after = undo[i + 1] ?? game;
+    if (!plannedTransition(before, after, capacity)) throw new Error("Invalid undo transition");
+  }
+  return { game, undo, shuffleCount: integer(data.shuffleCount),
+    // At most one free rescue can ever be spent per attempt.
+    rescues: integer(data.rescues ?? 0, 1),
+    // A loose ceiling: a save must never be discarded over a benign counter.
+    attempts: integer(data.attempts ?? 0, 1_000_000),
+    usedBooster: flag(data.usedBooster ?? false) };
+}
+
 function finish(data: Record<string, unknown>, level: number): Omit<Session, "level"> {
-  const original = generateLevel(level).game;
+  const campaign = generateLevel(level).game;
+  // A daily puzzle validates against today's generated board, not a campaign level.
+  const daily = data.daily ?? null;
+  if (daily !== null && !isDailyDate(daily)) throw new Error("Invalid daily date");
+  const active = validateAttempt(
+    data,
+    daily ? generateDailyPuzzle(dayNumber(daily)).game : campaign,
+  );
+
+  let stash: Attempt | null = null;
+  if (data.stash !== undefined && data.stash !== null) {
+    stash = validateAttempt(record(data.stash), campaign);
+  }
+  if (daily !== null && stash === null) throw new Error("Missing stashed attempt");
+  if (daily === null && stash !== null) throw new Error("Unexpected stashed attempt");
+
   const settings = record(data.settings);
   // autoAdvance is optional so that saves written before it existed still load.
   for (const key of ["sound", "vibration", "relaxed", "autoAdvance"]) {
@@ -81,29 +192,34 @@ function finish(data: Record<string, unknown>, level: number): Omit<Session, "le
       throw new Error("Invalid setting");
     }
   }
-  if (!Array.isArray(data.undo) || data.undo.length > UNDO_LIMIT) throw new Error("Invalid undo history");
-  const game = validateGame(data.game, original);
-  const undo = data.undo.map((entry) => validateGame(entry, original));
-  // Every saved undo frame must lead to the next by exactly one ordinary pick.
-  for (let i = 0; i < undo.length; i++) {
-    const before = undo[i];
-    const after = undo[i + 1] ?? game;
-    const removed = before.board.filter((t) => !after.board.some((other) => other.id === t.id));
-    const move = removed.length === 1 ? planMove({ ...before, capacity: capacityOf(game) }, removed[0].id) : null;
-    if (!move || JSON.stringify(move.result.board) !== JSON.stringify(after.board) ||
-      JSON.stringify(move.result.tray) !== JSON.stringify(after.tray)) throw new Error("Invalid undo transition");
-  }
+
   const rewardedThrough = integer(data.rewardedThrough, level);
-  if (rewardedThrough < level - 1 || (game.status === "won" && rewardedThrough !== level)) throw new Error("Invalid reward state");
-  // At most one free rescue can ever be spent per attempt.
-  const rescues = integer(data.rescues ?? 0, 1);
-  return { game, undo, coins: integer(data.coins), rewardedThrough, rescues,
-    // A loose ceiling: a save must never be discarded over a benign counter.
-    attempts: integer(data.attempts ?? 0, 1_000_000), usedBooster: flag(data.usedBooster ?? false),
+  if (rewardedThrough < level - 1) throw new Error("Invalid reward state");
+  // A campaign win is banked immediately; a daily win never touches campaign progress.
+  if (daily === null && active.game.status === "won" && rewardedThrough !== level) {
+    throw new Error("Invalid reward state");
+  }
+
+  const lastDaily = data.lastDaily ?? null;
+  if (lastDaily !== null && !isDailyDate(lastDaily)) throw new Error("Invalid last daily");
+  const dailyStreak = integer(data.dailyStreak ?? 0, 100_000);
+  const dailyBestStreak = integer(data.dailyBestStreak ?? 0, 100_000);
+  const dailiesCleared = integer(data.dailiesCleared ?? 0, 100_000);
+  if (dailyBestStreak < dailyStreak) throw new Error("Invalid daily streak");
+  // A banked daily implies a live streak and at least one completion.
+  if (lastDaily !== null && (dailyStreak < 1 || dailiesCleared < 1)) throw new Error("Invalid daily counters");
+  // A won daily must have banked its reward for that exact date.
+  if (daily !== null && active.game.status === "won" && lastDaily !== daily) {
+    throw new Error("Invalid daily reward state");
+  }
+
+  return { ...active, coins: integer(data.coins), rewardedThrough,
     stars: validateStars(data.stars, level, rewardedThrough),
-    shuffleCount: integer(data.shuffleCount), revision: integer(data.revision),
+    revision: integer(data.revision),
     settings: { sound: settings.sound as boolean, vibration: settings.vibration as boolean,
-      relaxed: settings.relaxed as boolean, autoAdvance: settings.autoAdvance === true } };
+      relaxed: settings.relaxed as boolean, autoAdvance: settings.autoAdvance === true },
+    daily: daily as string | null, stash, lastDaily,
+    dailyStreak, dailyBestStreak, dailiesCleared };
 }
 
 export function decodeSession(raw: string): Session {
@@ -120,8 +236,9 @@ export function decodeSession(raw: string): Session {
     if (migrated.game.status === "won") migrated.rewardedThrough = migrated.level;
     return migrated;
   }
-  // Version 2 saves predate rescue, attempt, and star tracking.
-  if (![2, VERSION].includes(data.version as number) || data.generator !== GENERATOR_VERSION || !isLevelNumber(data.level)) {
+  // Older versions predate rescue, attempt, star, daily, frozen, and objective
+  // tracking; the missing fields default on the way in.
+  if (![2, 3, 4, VERSION].includes(data.version as number) || data.generator !== GENERATOR_VERSION || !isLevelNumber(data.level)) {
     throw new Error("Unsupported save");
   }
   return { level: data.level, ...finish(data, data.level) };
