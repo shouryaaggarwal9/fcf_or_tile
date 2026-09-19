@@ -473,6 +473,29 @@ h1 {
   filter: brightness(0.73) saturate(0.75);
 }
 
+/* The lock chip sits in the tile's corner. It only ever appears on locked
+   tiles, so the icon itself carries the state — no colour-only signal. */
+.tile-lock {
+  position: absolute;
+  top: 2%;
+  right: 2%;
+  display: grid;
+  place-items: center;
+  width: 34%;
+  max-width: 22px;
+  aspect-ratio: 1;
+  border-radius: 30%;
+  background: #fff9eee6;
+  box-shadow: 0 1px 3px #1b234645;
+  pointer-events: none;
+}
+
+.tile-lock svg {
+  display: block;
+  width: 82%;
+  height: 82%;
+}
+
 .goal-line {
   margin: 0 0 8px;
   padding: 8px 12px;
@@ -638,6 +661,14 @@ h1 {
 
 .board-tile.blocked {
   cursor: default;
+}
+
+.board-tile.blocked[aria-disabled="true"] {
+  cursor: default;
+}
+
+.board-tile {
+  overflow: hidden;
 }
 
 .tray-panel-danger {

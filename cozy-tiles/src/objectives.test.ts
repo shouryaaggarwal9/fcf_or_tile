@@ -122,12 +122,14 @@ describe("objective scheduling", () => {
     }
   });
 
-  it("builds a pick limit that the witness can beat", () => {
+  it("builds a pick limit that the witness beats with tightened slack", () => {
     for (const level of [20, 30, 50, 100]) {
       const { game, solution } = generateLevel(level);
       expect(game.limit).toBeDefined();
       expect(game.goal).toBeUndefined();
       expect(game.limit!.limit).toBeGreaterThanOrEqual(solution.length);
+      // The adult curve: max(3, 10%) slack instead of max(5, 25%).
+      expect(game.limit!.limit).toBe(solution.length + Math.max(3, Math.round(solution.length * 0.1)));
       expect(game.limit!.used).toBe(0);
     }
   });

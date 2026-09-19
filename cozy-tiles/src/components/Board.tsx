@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { isSelectable, TILE_FACE } from "../game";
+import { isLocked, isSelectable, TILE_FACE } from "../game";
 import type { GameState } from "../game";
 import type { BoardBounds } from "../levels";
 import { LABELS } from "../symbols";
@@ -15,7 +15,7 @@ type BoardProps = {
   hintId: string | null;
   onSelect: (id: string, source: HTMLButtonElement) => void;
   /** Called when a tap is refused, so the game can explain why. */
-  onBlocked: (reason: "covered") => void;
+  onBlocked: (reason: "covered" | "locked") => void;
 };
 
 export function Board({
@@ -59,13 +59,16 @@ export function Board({
     return () => window.clearTimeout(timer);
   }, [deniedId]);
 
-  function deny(id: string, reason: "covered") {
+  function deny(id: string, reason: "covered" | "locked") {
     setDeniedId(id);
     feedback.deny();
     onBlocked(reason);
   }
 
-  const instruction = "Only uncovered tiles can be picked.";
+  const hasLocks = game.board.some((tile) => isLocked(game, tile.id));
+  const instruction = hasLocks
+    ? "Only uncovered tiles can be picked. Key tiles unlock the tiles they guard."
+    : "Only uncovered tiles can be picked.";
 
   return (
     <section className="play-area" aria-label="Tile board">
@@ -81,7 +84,8 @@ export function Board({
         >
           {game.board.map((tile) => {
             const selectable = isSelectable(game, tile.id);
-            const block = selectable ? null : "covered";
+            const locked = !selectable && isLocked(game, tile.id);
+            const block = selectable ? null : locked ? "locked" : "covered";
 
             const style = {
               left: `${(tile.x / layout.width) * 100}%`,
@@ -108,13 +112,38 @@ export function Board({
                 // aria-disabled keeps that honest for assistive tech.
                 disabled={busy}
                 aria-disabled={block !== null}
-                aria-label={`${LABELS[tile.kind]}, ${block ? "covered" : "available"}`}
+                aria-label={`${LABELS[tile.kind]}, ${
+                  block === "locked" ? "locked" : block === "covered" ? "covered" : "available"
+                }`}
                 onClick={(event) => {
                   if (!block) onSelect(tile.id, event.currentTarget);
                   else deny(tile.id, block);
                 }}
               >
                 <TileIcon kind={tile.kind} />
+                {locked && (
+                  <span className="tile-lock" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" focusable="false">
+                      <path
+                        d="M4.5 7V5.2a3.5 3.5 0 0 1 7 0V7"
+                        fill="none"
+                        stroke="#8a5a12"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                      <rect
+                        x="2.8"
+                        y="7"
+                        width="10.4"
+                        height="6.6"
+                        rx="1.6"
+                        fill="#f2b64c"
+                        stroke="#8a5a12"
+                        strokeWidth="1.4"
+                      />
+                    </svg>
+                  </span>
+                )}
               </button>
             );
           })}

@@ -1,0 +1,238 @@
+The user wants a discussion about increasing difficulty for adults. They said "do not make any changes yet" — so this is a design discussion turn, ending with a thorough text prompt for implementation later.
+
+Let me think holistically about the engine as it stands:
+
+Current state after our changes:
+- **Shapes**: All within 4 columns × 5 rows max (grid(4,3), diamond 3×5, arch, ring 4×4, cottage, heart). Max 48 tiles over 6 layers. Comment says "Every silhouette stays within four columns so a 320px screen keeps readable faces."
+- **Layers**: recipes have layers 2-6 (DIFFICULTY: layers 2,3,4; LATE_RECIPES: layers 4,5,6,5,4,5). But the user says the game "has 2-3 layers only" — because layer count only goes up past level 30, and even then, tiles per layer is floor(tiles/layers), so with 48 tiles/6 layers = 8 tiles per layer. Actually the layering works: each layer's positions are chosen from the same `candidates` list — positions get reused across layers with 0.5 offsets. So upper layers overlap lower ones. With 48 tiles over 6 layers, 8 per layer.
+- **Coverage model**: `covers()` = upper layer, |dx| < TILE_FACE (0.92), |dy| < 0.92. Layers offset by (layer%2)*0.5 in both x and y. So each upper tile can cover up to 4 lower tiles. Coverage is the core difficulty driver: a tile under 1-2 tiles.
+- **Tray**: 6 slots, 7 with permanent booster. Loss when tray fills without a triple.
+- **Mechanics remaining**: collect goals, move limits, gentle levels, shapes rotation, daily puzzles.
+- Boosters: undo, shuffle, wand, skip, seventh slot. Rescue. Hints.
+- MAX_LEVEL = 1e9, difficulty cycles.
+
+Why it feels basic (adult difficulty analysis):
+1. **Small boards**: max 48 tiles. Real tile-matchers for adults go 100+ tiles with deep stacks.
+2. **Shallow coverage**: with ≤6 layers and 4-col silhouettes, average covered depth is low; many free picks at any time. The "only uncovered tiles" constraint barely binds.
+3. **Wide kind palette relative to board size**: kinds up to 20 with 36-48 tiles means each kind appears once or twice — wait, no: tiles must be multiples of 3 per kind, and kinds ≤ tiles/3. With 48 tiles and 16 kinds, each kind appears exactly 3 times — so every triple is fully on the board; you never hold 2 waiting for a 3rd... actually you can, since you pick out of order. Hmm, with each kind appearing exactly 3 times, holding 2 of a kind means the third is somewhere on the board, possibly buried. That's fine. But with 48 tiles and only 16 kinds, there are many kinds with few copies — the tray rarely gets pressured because... actually pressure comes from picking out of order. With 48 tiles/16 kinds, in the worst case you hold 2×16 = 32... no, tray is 6.
+4. **The insertion rule + 6-slot tray with 3-of-a-kind matching is inherently forgiving** when kinds per level are high (more distinct kinds = less chance of holding near-triples? no...). Let me think again: difficulty in Sheep-a-Sheep-like games comes from: board size, layering depth, number of distinct kinds (more kinds = harder to complete triples = tray fills), and special tiles.
+5. **Generous aids**: free rescue, undo (48 deep!), safe hints, gentle levels every 8th, 100 starting coins, cheap boosters, relaxed mode.
+6. **No time pressure** (deliberately cozy).
+7. **Shapes are wide and flat**: 4 columns means the footprint is small; layer offsets mean upper tiles sit on a half-grid, covering up to 4 tiles but in practice often 1-2.
+
+Key engine levers to increase difficulty (adult focus):
+1. **Bigger, deeper boards**: more tiles (72-120), more layers (6-9), taller stacks. Constraint: readability on 320px. Solution: keep tile face size but allow the board to scroll? Or reduce min face size to ~40px and allow wider footprints (5-6 cols)? Or zoom/pan? This is the biggest visual/design decision. Options: pan-and-zoom board (pinch), or scale-to-fit with min readable size and cap footprint.
+2. **Layer geometry**: current layered offsets are uniform. Could vary offsets per layer (half-offsets vs full-offsets) to create deep single-column stacks ("wells") where a chain of 3-4 tiles covers one key tile. Deterministic seeded variation.
+3. **Kind count tuning**: fewer distinct kinds per board = more copies of each = deeper triples spread across the stack = harder? Actually more kinds = harder (each triple is 3 specific tiles among many). For adults: increase kinds to force more distinct targets: e.g., 48 tiles / 16 kinds currently; go 90 tiles / 20 kinds = 4.5 groups per kind. Also allow "2 kinds appearing 3x and many appearing 6x" etc. The palette is 20 kinds; boards can reuse.
+4. **The real difficulty knob in this genre: coverage chains that force ordering.** The generator already computes a witness by removing one legal tile at a time — it never verifies the player can *discover* it under tray constraints beyond arrival ≤ 3... Actually buildPuzzle verifies full win via witness with tray never exceeding... wait, it checks `move.result` which resolves triples; arrival.tray ≤ 3 is asserted in tests, not enforced by generator. The generator enforces solvability only via the witness. If we make boards bigger, the witness replay stays valid.
+5. **Tray pressure mechanics for adults**: keep 6 slots but bigger boards naturally create pressure. Could add: no free rescue on hard tiers? Or keep.
+6. **Undo depth / hint cost**: adults wanting focus could get harder modes: e.g., "Focus Mode" — no hints, undo limited (3), no rescue. Star ratings could require no undo.
+7. **Objectives tightening**: move limits tighter (witness + 10% instead of +25% slack), collect goals requiring specific order? Careful: generator must guarantee winnable. The witness guarantees; tighter limits shrink slack but slack 5 + 25% is generous; could scale by tier.
+8. **New adult mechanics that fit the engine** (each needs generator+witness support):
+   - **Locked/chained tiles**: tile requires N picks of marked tiles elsewhere first (like "keys"): engine change to `coveredBy`-like gating: `lockedBy: string[]` — a tile is selectable only when all its `lockedBy` tiles are gone. This is a generalization of coverage — the engine already models exactly this via `coveredBy`! A "lock" is just coverage from a non-adjacent tile. Extremely cheap to implement in engine; generator must place locks such that witness still works (locks' tiles removed before locked tile in witness — automatic if lock targets are "under" in witness order? no, need to ensure the key is picked before the locked tile becomes selectable... the witness removes tiles in some order; if key is removed after the locked tile would be needed... the witness picks only selectable tiles, so if a locked tile is in the witness before its key, planMove fails and generation throws. So generator must add locks and re-verify; simplest: lock tile A with key B only if B precedes A in witness. Deterministic and safe.)
+   - **Duplicate-symbol fog / hidden kinds**: tiles whose kind is hidden until uncovered (kind: "mystery" assigned on reveal). Engine: tile.kind = "mystery" until it becomes top; on reveal, assign from remaining multiset. Trickier: findTriple and validation; witness unaffected (solution replays assign same kinds deterministically). Save validation: kind can change on reveal — validator must accept. This is a real feature of adult tile games.
+   - **Tray-hazard tiles**: e.g., "stone" tiles that occupy a slot until cleared via adjacent picks? Probably overkill.
+   - **Move pressure**: pick-limited tiers with less slack.
+9. **Difficulty curve restructure**: tiers by level bands with real depth: e.g., levels 1-10 tutorial (current), 11-30 introduce 5-6 layer 60-tile boards, 30+ rotate 72-120 tile "deep" recipes, 100+ "abyss" recipes with locks+fog. Gentle levels remain.
+10. **Performance considerations**: 120 tiles fine for React with absolute positioning; the clamp logic for height needs scroll/zoom decision.
+11. **Board sizing/UX for adults**: The 4-column limit was for readability. For adults on phones: allow 5-6 columns with slightly smaller faces (TILE_FACE stays 0.92 in board units; the board scales to fit width — the CSS clamps to width*88px... `maxWidth: min(layout.width*88, widthLimit)`. So a 6-wide board scales down. Min readable ~44-48px at 320px width → 6 cols ≈ 45px each. Acceptable. Also add pinch-zoom/pan for big boards? PWA audience; maybe scale-to-fit is enough, plus optional zoom is polish. Keep scope: scale-to-fit with min-width floor and pan if clamped? I'd propose: scale to fit, keep faces ≥ 40px equivalent by capping total columns at 6 and rows at 8; larger content uses pan? Hmm — deep boards with 8 rows on a phone will be tiny if fit-to-width AND fit-to-height. The existing height clamp keeps aspect. For 120 tiles: e.g., 6 cols × 8 rows × up to 3-4 stack bands. Realistic: footprint 6×7 = 42 slots; 120 tiles over 8 layers ≈ 15/layer — slots allow 42 positions per layer band, fine.
+    Simplest robust choice: keep scale-to-fit (current behavior) but raise max footprint and accept smaller tiles, with a floor: if face < 36px equivalent, enable pan mode? To keep the first implementation shippable: cap footprints at 6×6 and layers at 8; 96-120 tiles. Faces: 320px screen: 6 cols → 45px. Fine.
+12. **Witness/generator changes for depth**: The `buildPuzzle` layer loop spreads tiles evenly across layers using same candidate list — deeper boards need the candidate list to support more stacking (it already reuses positions each layer with alternating offsets, so 8 layers = 4 distinct offsets ×2 — wait, layer%2 alternates two offset schemes; layers 0,2,4,6 share offsets but different layer numbers, so they stack straight on each other (covers requires upper.layer > lower.layer, and same x,y → covers). So a position can host a vertical column of tiles! candidates get reused layer after layer: layer 0 takes candidates[0..7], layer 1 takes candidates[0..7] offset by 0.5 — so layer1 tile at (x+0.5,y+0.5) covers up to 4 layer-0 tiles. Layer 2 sits at same coords as layer 0 → covers layer-1 tiles directly above same slot? covers(): |dx|<0.92,|dy|<0.92, layer strictly greater. Layer2 at (x,y) vs layer1 at (x+0.5,y+0.5): dx=0.5<0.92 → covers. So it's a dense alternating stack — depth works. Good: raising layers/tiles mostly "just works" in the generator; the shapes' position lists limit width/height.
+    Also `boardBounds` and layout scale automatically.
+    The removal-order witness: with deeper stacks, `available` shrinks; random pick still yields a legal order; tray bound: `arrival.tray ≤ 3` held for current sizes because consecutive witness groups share kinds... actually arrival ≤ 3 isn't guaranteed by construction; the tests assert it for generated levels (the witness resolves quickly). With more kinds (up to 20) and bigger boards, arrival tray could spike; the generator doesn't enforce a tray cap during witness — a "lost" result (tray overflow) would end the witness loop with status != won and throw "Generated level is not solvable". So generator self-checks. But we may want to enforce peak tray ≤ capacity - 1 in generation by regenerating with different seed? The seed is fixed per level; if a level's witness overflows the tray, generation throws → app crash. Currently safe because arrival ≤ 3-ish on small boards. For bigger boards with more kinds, the witness might exceed 6 tray mid-replay → throw. Need a generator safeguard: reorder solution (pick a different removal order) or reduce kinds, retry loop with seeded variations until witness peak tray ≤ 5 (leaving no-loss margin). This is an important implementation detail to put in the prompt: **the generator must search removal orders until it finds one whose peak tray occupancy stays ≤ capacity−1**, e.g., up to N retries with a seeded PRNG stream, else fall back to fewer kinds/layers.
+13. **Star/rating system**: maybe tie 3-star to no-undo (already: attempts=0 && !usedBooster → 3 stars; undo counts as booster). Fine as-is.
+14. **Hint economy**: hints are free and safe — adults may want them off; settings toggle "Disable hints" or hint costs coins. Could keep but make hint cost coins in non-relaxed mode.
+15. **Rescue**: free once per attempt — keep or gate to relaxed? Discussion point.
+16. **Daily**: scale dailies up moderately (they're "a treat"), maybe introduce weekly "deep" daily on Sundays.
+
+Also: the user's premise "game has 2-3 layers only" — actually recipes go to 6 layers after level 30, but early game and the visible footprint are shallow; also because tiles-per-layer spread, coverage density is low (each upper tile covers only what's within 0.92 — with 0.5 offsets, up to 4, but spread-out candidates mean many upper tiles cover 1-2). Perceived depth is low. Increasing *density* (more tiles per footprint slot across layers) matters more than raw layer count.
+
+Difficulty levers ranked by impact:
+1. Board size & density (tiles, footprint, layers) — biggest.
+2. Kind count relative to tray (more kinds = harder).
+3. Order-forcing structures: locks (cheap via coveredBy generalization), maybe fog.
+4. Tighter move limits/objectives.
+5. Aid economy (undo depth, hint cost, rescue gating, Focus mode).
+6. New shapes with narrower chokepoints (e.g., hourglass, towers) — chokepoints = tiles whose uncovering gates many others (high coveredBy counts). Current shapes have fan-out ≤ ~2. Add shapes with 3-4 cover counts ("towers" stacked 4-deep).
+
+Constraints to respect:
+- Determinism & GENERATOR_VERSION bump; save validation against regenerated boards (validator replays against original board; kinds/positions must match new generator — bump version, old saves reset).
+- Test suite: level-sweep tests (level %i winnable) iterate 200 levels + MAX_LEVEL; bigger boards × 203 generation runs — buildPuzzle runs planMove over witness (~tiles length) — 120 tiles × 203 levels fine (ms range). The App tests have 20s suites; fine.
+- Readability floor: faces ≥ ~44px at 320px → max 6 columns. Height: clamp exists; maybe allow scroll if too tall? Keep fit-to-height clamp; cap rows ≤ 7 so faces ≥ ~48px on short screens? The height clamp shrinks width to match aspect — tall boards get small. Cap total height in board units ~6 rows → on 320×~500px play area, board height ≈ 500px→ width = height*(w/h)... eh, implementation detail: add test asserting min rendered face ≥ 44px at 320×568 viewport for all recipes, adjusting recipes if violated.
+- Keep cozy brand: difficulty via depth/focus, not timers. No sudden-death clocks; move limits already exist.
+- Witness & fairness: no wilds now; every kind multiple of 3 — bigger boards: tiles/3 groups, kinds ≤ 20 palette → max distinct kinds = min(recipe.kinds, groups). For 120 tiles: 40 groups; kinds 20 → each kind 6 copies (2 groups). Deep spread = good difficulty.
+
+What about "2-3 layers" claim — we might also *show* depth better: render shadows/stacking affordance already via --tile-scale. Maybe visual polish: stronger shadow per layer. Minor.
+
+Proposed phased plan:
+- **Phase 1 — Depth & size (core)**: New DIFFICULTY/LATE_RECIPES tables: bigger tiles (max 96-120), layers up to 8, footprint up to 6×6/6×7 via new shapes (add "tower", "hourglass", "pyramid" shapes with 5-6 cols). Generator safeguard: retry removal orders until peak tray ≤ capacity−1; assert min-face readability in tests. Bump GENERATOR_VERSION.
+- **Phase 2 — Kind pressure**: Raise kinds per tier (up to 20); re-tune gentle levels. Add per-tier "kind spread" rule: prefer kinds with most copies? Keep simple: kinds = min(palette, floor(groups × density)) tuned per tier.
+- **Phase 3 — Order-forcing mechanics**: 
+  a) Locks (key tiles): engine `lockedBy?: string[]` on Tile; isSelectable checks keys removed (like coveredBy but cross-board). Generator adds locks on pairs (key precedes locked tile in witness) up to N per level by tier; render a small lock chip + instruction line; save validator: locks fixed by generator (positions of keys fixed), progress validated by planMove replay anyway. Daily too.
+  b) Hidden kinds (fog): maybe defer; discuss tradeoff.
+- **Phase 4 — Aid economy & modes**: undo cap per attempt (e.g., 5) in Standard; hint costs 10 coins in Standard (free in Relaxed); rescue stays free once; "Focus Mode" toggle: no hints, no undo, 3 stars guaranteed on win? Keep stars math.
+- **Phase 5 — Objective tightening**: moves slack 25%→10% (min 3); collect goals with needed = full group (already) but target chosen deeper in witness; introduce "order" pressure naturally via locks.
+- **Phase 6 — Curve & daily**: re-band levels: 1-10 tutorial; 11-25 medium (48-60 tiles, 4-6 layers); 26-49 large (60-84); 50+ deep (84-120, locks); 100+ nightmare rotations. Dailies scale with weekday; Sunday "Deep daily".
+
+Also mention engine cleanups enabled: since board can now exceed old bounds, `boardBounds`/clamp already handle; the `USE` of `Math.max(...board.map(...))` with empty board → -Infinity, only if board empty & no goal — resolveState wins before render; fine.
+
+Testing plan: extend levels.test sweep to assert: winnable, peak tray ≤ 5, min face ≥ 44px @320, every kind count %3=0, locks' keys precede locked tiles in witness, determinism; session storage round-trips on a deep level; App-level smoke on a big level (maybe level 60) renders and clamps.
+
+Performance: 120 buttons re-render per move — fine; `coveredBy` computed O(n²) at 120 → 14k ops trivial.
+
+Save size: 120-tile undo ×48 frames within 1MB limit — fine (each frame ~ tiles remaining... undo stores full GameState each pick; 48 frames × 120 tiles × ~90 bytes ≈ 500KB worst case — near the 1MB decode limit! Note: decode limit is 1,000,000 chars; current max board 48 tiles passed with <200KB. 120 tiles → could approach ~500KB; still under. Maybe reduce UNDO_LIMIT for deep levels or keep. Mention in prompt: verify save size headroom test.
+
+Presentation: The user wants a detailed discussion first, then a thorough implementation prompt at the end. No code changes. Use discussion format, maybe ask a couple of clarifying preferences via ask_user? The instruction says use ask_user for non-obvious decisions. There are real forks: (1) board size vs readability strategy (scale-to-fit smaller faces vs pan/zoom), (2) whether to add new mechanics (locks/fog) or keep pure, (3) aid economy changes. But the user asked me to discuss in detail and end with a thorough prompt — they want my analysis and a proposal. I could present the analysis, then ask 2-3 targeted questions via ask_user to lock the design before writing the final prompt. That matches "discuss with me". Then in the same turn after their answers? ask_user pauses for response — the flow: I give discussion + ask questions; they answer; then I produce final prompt. But the user explicitly said "First discuss in detail and in the end give a thorough text prompt to implement those changes" — i.e., in THIS turn: discussion then prompt. If I ask_user first, the prompt comes next turn, which might annoy ("do not spiral"). Better: deliver full discussion + design decision points with my recommendations, then the final prompt embodies my recommended choices, noting alternatives inline. That fulfills their request in one turn. I'll skip ask_user; they want the deliverable now. Actually, hmm — "discuss with me how we can increase the difficulty" — a hybrid: end-of-turn suggest_followups offering to adjust choices. Yes.
+
+Structure of response (concise but detailed; terminal display):
+1. Why it feels easy today — diagnosis grounded in the engine (numbers: max 48 tiles, ≤6 layers, ≤4 cols, coverage density, kinds math, aid economy).
+2. The levers, ranked, with what each costs (generator/witness/validator/UI/tests).
+3. Recommended target design (tier table).
+4. Risks & guardrails (readability floor, generator tray-overflow safeguard, save size, version bump, test sweep).
+5. The thorough implementation prompt (clearly delimited block) — detailed, file-by-file, with acceptance criteria.
+6. suggest_followups.
+
+Length: substantial but not bloated. The final prompt should be self-contained (they'll paste it). Use a code block for the prompt so it's copyable.
+
+Key numbers for tier redesign (proposal):
+- Palette 20 kinds, all multiple-of-3 constraint, tiles % 3.
+- DIFFICULTY (early):
+  - 1–3: current 12 tiles, 2 layers, 3 kinds (tutorial preserved incl. handcrafted level 1).
+  - 4–10: 18 tiles, 3 layers, 4-5 kinds.
+  - 11–20: 30-36 tiles, 4 layers, 6-8 kinds.
+  - 21–30: 48 tiles, 5 layers, 10-12 kinds.
+- LATE_RECIPES (31+), rotate shapes incl. new dense ones:
+  - 48–60 tiles, 5–6 layers, 12–16 kinds, 0-2 locks.
+  - 72 tiles, 6–7 layers, 16–18 kinds, 2-3 locks.
+  - 96 tiles, 7–8 layers, 18–20 kinds, 3-4 locks (from ~level 60).
+  - 120 tiles "abyss", 8 layers, 20 kinds, 4-6 locks (every Nth level, e.g., %10==7), footprint 6×7.
+- Gentle levels (every 8th): ~60% tiles, kinds scaled, no locks.
+- Moves objective slack: max(3, 10%).
+- New shapes (5-6 cols): "tower" (narrow 2×2 core + wings, deep), "hourglass" (chokepoint), "pyramid" (wide base 6, shrinking), keep old ones for variety; cap footprint 6 wide × 7 tall.
+
+Engine changes for locks:
+- Tile.lockedBy?: string[]; isSelectable: uncovered && lockedBy.every(id => !board.some(t => t.id === id)).
+- planMove unchanged (selectability check covers). Undo/plannedTransition: locked tile remaining on board is fine; validator replay uses planMove so consistent. boardKey unchanged (kind+id); locks are static per generator — validator compares against regenerated original which includes locks. 
+- UI: lock chip on locked tiles (small 🔒-like SVG), aria-label "locked (collect N keys)", blocked reason "locked" distinct from "covered" → new deny message + feedback sound.
+- Generator: after computing solution, choose candidate (key,locked) pairs where index(key) < index(locked) and locked tile is not selectable-at-start anyway? Locks on tiles that are selectable at start are also fine (they start locked). Keys should be tiles removed earlier in witness; add `lockedBy` to locked tile referencing key ids; witness replay then requires key pick before locked pick — planMove(locked) would return null if picked while locked... in witness order key comes first, so locked tile is unlocked when reached. Also ensure key itself is not behind the locked tile? Not necessary.
+  - Validate: no cycles (each lock references keys strictly earlier in witness → acyclic by construction).
+  - Cap locks so they don't make trivial: keys should be *buried* (high depth) for real difficulty; prefer keys with depth ≥2 (coveredBy nonempty at generation time... depth at start).
+- Also a subtle interaction: shuffle booster reassigns kinds only, keeps coverage; locks reference tile ids (static) — unaffected. Wand removes any triple incl. potential keys — fine, locks just unlock. No fairness issues since no wilds.
+
+Hidden-kinds (fog) — recommend deferring: touches findTriple/validator/boardKey kind equality; bigger blast radius. List as future option.
+
+Aid economy (recommend):
+- UNDO_LIMIT stays 48 (cozy), but 3-star already requires no boosters — keep. Optionally add per-level "par" display? Skip.
+- Hints: free safe hints trivialize discovery; recommend hint costs 15 coins in Standard (free in Relaxed), keeps families/kids via Relaxed. Small change in purchase/session + GameFooter button label shows cost.
+- Rescue stays free once/attempt (mercy without trivializing).
+- Relaxed Mode already zeroes prices — consistent.
+
+Also new: **tray pressure guard** in generator (peak tray ≤ capacity−1) — critical for big boards; implement by retrying removal-order shuffle up to K times (seeded), then reduce kinds; never throw.
+
+Test updates enumerated in prompt.
+
+Version bump: GENERATOR_VERSION 5 → 6.
+
+Also update SLICE docs? Repo has SLICE-*.md design docs; prompt can include a short new SLICE-10.md documenting the difficulty overhaul, matching project convention. Nice touch.
+
+Sweep performance: generation for 203 levels × up to 120-tile boards with retries — planMove replay O(t × board). Worst ~ 120 × 120 ops × retries(≤8) ≈ 115k × 203 ≈ 23M ops — fine in tests.
+
+Readability test: compute face px at 320px width & 500px height board area: face = min(280, ...) — the existing formula `280 * TILE_FACE / bounds.width ≥ 48` test exists for width. With 6 cols: bounds.width ≈ 6+0.5 offsets? Layer offsets add 0.5 → width up to cols + 0.5. 280×0.92/6.5 ≈ 39.6px < 48. So either relax the floor to ~40px or cap 6-col shapes to fewer effective columns... 39.6px is still tappable (min touch 44 recommended). Options: bump the test floor to 40 and note 320px worst case; or cap widths at 5.5 units. I'll spec: faces ≥ 40px at 320 width for late shapes; ≥ 44 for ≤5-col shapes. And height clamp test updated accordingly. Provide this in prompt.
+
+Also daily size bump: 30-48 tiles currently → 48-72 with 6-8 kinds, keep "treat" scale; Sunday deep 84.
+
+Now write the response. Keep discussion crisp with headers and bullet numbers; end with the prompt in a fenced block. The prompt must be thorough: goal, non-goals, engine changes, generator changes with pseudocode-ish specs, UI, storage, economy, curve tables, tests with acceptance criteria, docs, and rollout/versioning. Include explicit file paths from the repo.
+
+Length target: discussion ~600-800 words, prompt ~700-900 words. It's a lot but user asked for thorough. Avoid spiraling; be decisive with recommendations.
+
+Good brief. I know this engine end-to-end now, so here's an honest diagnosis and a concrete path. No code touched yet.
+
+## Why it feels basic — the actual numbers in the engine
+
+1. **Boards are tiny.** Hard cap is 48 tiles (`LATE_RECIPES`), and that only appears past level 30. Levels 1–30 are 12–30 tiles. An adult-focused stacker lives in the 80–150 tile range.
+2. **Footprint is 4 columns wide** — a deliberate old constraint ("so a 320px screen keeps readable faces"). A 4-wide board means each upper tile covers at most 2–4 lower tiles, and because candidates are spread center-out, most cover only 1–2. Coverage barely binds; there are almost always many free picks.
+3. **Depth is an illusion.** Recipes claim "6 layers," but tiles are spread evenly (`floor(tiles/layers)`), so upper layers are sparse. What creates difficulty in this genre is *density* — vertical stacks where one buried tile gates 3–4 above it — not the layer count itself.
+4. **Kind math is generous.** With 48 tiles and 16 kinds, every kind appears exactly 3 times. Every triple is fully on the board from move one; the tray is never actually pressured. More kinds relative to tiles (and more copies of each kind buried across the stack) is the pressure dial.
+5. **The aid economy is cozy by default.** Free safe hints, undo depth of 48, a free rescue per attempt, gentle level every 8th. Fine for comfort, but nothing demands focus.
+6. **Objectives are slack.** Move limits give witness + max(5, 25%) picks — very forgiving.
+
+## The levers, ranked by impact per unit of engine risk
+
+| Lever | Impact | Engine risk |
+|---|---|---|
+| Bigger, denser boards (tiles, layers, footprint 5–6 cols) | Massive | Low — generator already supports stacking; only recipe tables + shapes change |
+| More kinds per board (up to the 20-kind palette) | High | Low |
+| **Locks ("key" tiles)** — a tile pickable only after specific key tiles are collected | High (adds real ordering decisions) | Low — this is *literally* the existing `coveredBy` model, just non-adjacent. Selectability check generalizes cleanly |
+| Hidden kinds (tiles revealed only when uncovered) | High | **High** — touches `findTriple`, save validation, `boardKey`. I recommend deferring this one |
+| Tighter move-limit slack (25% → 10%) | Medium | None (witness still wins) |
+| Aid economy: hint costs coins in Standard, Relaxed stays free | Medium | Low |
+| New chokepoint shapes (hourglass, tower, pyramid) | Medium | Low |
+
+**One critical hidden trap:** the generator verifies solvability by replaying a witness, but it never checks *peak tray occupancy* along the way. On today's small boards the peak never approaches 6, so it's never mattered. On 96–120 tile boards with 20 kinds, a random removal order can absolutely overflow the tray mid-replay — and `buildPuzzle` would throw "Generated level is not solvable" at runtime. Any size increase **must** add a seeded retry loop over removal orders until one keeps peak tray ≤ capacity−1. This is the single most important implementation detail.
+
+## My recommended design
+
+- **Tier curve:** 1–10 tutorial (kept), 11–20 → 36 tiles/4 layers/8 kinds, 21–30 → 48/5/12, 31–59 → 60–72/6–7/14–16 with 0–2 locks, 60–99 → 84–96/7–8/18–20 with 2–4 locks, 100+ → rotations up to 120 tiles ("abyss" recipe every 10th level). Gentle levels every 8th stay ~60% size, no locks.
+- **Locks, not fog.** Keys are buried tiles (depth ≥ 2), the locked tile's key always appears *earlier* in the witness — which makes the generator guarantee acyclicity for free. UI: a small lock chip, distinct "locked" tap feedback, separate from "covered."
+- **Footprint up to 6 wide × 7 tall**, scale-to-fit (the existing clamp already handles it). The current test floor of 48px faces drops to ~40px at 320px width for 6-col shapes — still tappable; ≤5-col shapes keep 44px+.
+- **Hints cost 15 coins in Standard**, free in Relaxed Mode (that's the accessibility valve — it already zeroes booster prices). Rescue stays free once per attempt.
+- **`GENERATOR_VERSION` 5 → 6** — old saves reset, which is correct since every board changes.
+
+---
+
+## Implementation prompt (copy-paste ready when you are)
+
+```
+Redesign Cozy Tiles' difficulty for adult players: bigger, denser, deeper boards with order-forcing "lock" mechanics. Keep the game deterministic, seed-stable, offline, and fully winnable-by-witness. Do not change the matching rule (three of a kind, no wilds), the tray rules, or the cozy visual identity. Bump GENERATOR_VERSION 5 → 6 in src/levels.ts.
+
+1) ENGINE — src/game.ts
+   - Add optional `lockedBy?: string[]` to Tile: ids of tiles that must be gone from the board before this tile is selectable.
+   - isSelectable: additionally require every id in tile.lockedBy to be absent from state.board (same pattern as coveredBy).
+   - planMove needs no other change (selectability gates it). findTriple, resolveState untouched.
+
+2) GENERATOR — src/levels.ts
+   - Add shapes to SHAPES with wider footprints: "tower" (2-col core rising 4 rows + 3-col wings at base), "hourglass" (6-3-6 row widths, chokepoint center), "pyramid" (6-5-4-3-2). Keep all existing shapes in rotation. Max footprint: 6 columns × 7 rows, honoring the LATE_SHAPES rotation.
+   - Replace DIFFICULTY and LATE_RECIPES with the adult curve:
+     * 1–3: unchanged (12 tiles, 2 layers, 3 kinds).
+     * 4–10: 18 tiles, 3 layers, 5 kinds.
+     * 11–20: 36 tiles, 4 layers, 8 kinds.
+     * 21–30: 48 tiles, 5 layers, 12 kinds.
+     * 31–59: rotate {60/6/14, 72/7/16, 66/6/15, 60/5/14} tiles/layers/kinds, 0–2 locks.
+     * 60–99: rotate {84/7/18, 96/8/20, 78/7/17, 72/6/16}, 2–4 locks.
+     * 100+: same rotation plus an "abyss" recipe every level where level % 10 === 7: 120 tiles, 8 layers, 20 kinds, 5 locks, shape "tower".
+     * Gentle levels (every 8th): 60% of the tier's tiles, kinds scaled to fit, 0 locks, shape unchanged.
+   - Recipe gains `locks: number`. Extend Recipe type accordingly.
+   - Lock placement in buildPuzzle, after the witness solution is computed: pick `locks` (key, target) pairs where target is a tile with starting depth ≥ 2 (coveredBy non-empty at generation) and index of key in solution < index of target (guarantees acyclicity and a legal witness). Set target.lockedBy = [key.id]. Keys must not themselves be locked by later keys. If fewer valid pairs exist than `locks`, place fewer — never fail.
+   - CRITICAL — tray-overflow safeguard: after computing a removal order, replay it with planMove and track peak tray occupancy. If peak > capacity − 1 (i.e., 5), reshuffle the removal order with the seeded RNG and retry, up to 12 attempts; if all fail, retry with kinds reduced by 1 (min 3), then tiles reduced by one group. Generation must never throw for tray reasons.
+   - Update dailyRecipe: scale dailies to 48–72 tiles (Mon–Sat rotating the mid tiers) and a "deep daily" of 84 tiles on dayNumber % 7 === 6. No locks on dailies. Still no goal/limit.
+   - objectiveFor unchanged, but move-limit slack in buildPuzzle drops from max(5, 25%) to max(3, 10%) of witness length.
+
+3) UI — src/components/Board.tsx, TileIcon.tsx, index.css
+   - Locked tiles render a small lock chip (inline SVG, no emoji) in a corner; aria-label gains ", locked" and they are aria-disabled. Add a distinct `blocked` reason "locked": onBlocked supports "covered" | "locked"; useCozyTiles.blocked sets the notice "Collect its key tile first." for locked (keep covered taps quiet as today). feedback: reuse deny() for locked taps; no new sound required.
+   - Instruction line: when the board has any locked tile, prepend "Key tiles unlock the tiles they guard." (same conditional pattern the old rainbow line used).
+   - Keep scale-to-fit. Lower the implicit readability budget: faces may reach ~40px at 320px width on 6-column shapes.
+
+4) ECONOMY — src/session.ts, src/components/GameFooter.tsx
+   - Hints cost 15 coins in Standard Mode and are free in Relaxed Mode, mirroring price(): show the cost on the hint button; refuse with "Not enough coins." when unaffordable. A paid hint still sets usedBooster (it already affects stars only via purchase — keep hints OUT of usedBooster today; preserve current star semantics exactly).
+   - Rescue, undo, shuffle, wand, skip unchanged.
+
+5) STORAGE — src/sessionStorage.ts, src/progress.ts
+   - No schema change needed: locks are static generator data, validated implicitly because validateGame compares against the regenerated original board and plannedTransition replays planMove. Verify this holds for a lock-bearing level and add a round-trip test.
+   - Confirm worst-case save size stays under the 1,000,000-char decode limit with a 120-tile board and 48 undo frames (add a test like the existing "largest realistic save" one).
+
+6) TESTS
+   - levels.test.ts sweep: extend the existing level %i determinism/winnability sweep to assert, for every swept level: peak tray during witness ≤ 5; every kind count % 3 === 0; every lockedBy id exists, its key precedes the locked tile in the solution, and the key is never locked itself; witness length === board length (no frost anymore).
+   - New readability test: for every tier recipe, 280 * TILE_FACE / bounds.width >= 40.
+   - game.test.ts: locks — covered-but-unlocked is selectable, locked-but-uncovered is not, collecting the key unlocks it, undo restores the lock (it never consumed it).
+   - session.test.ts: move-limit slack tightened (a level with limit still wins via witness); hint purchase flow: free in Relaxed, 15 coins and coins-deducted in Standard, refused when broke.
+   - App.mechanics.test.tsx: on a lock-bearing level (find one ≥ 31 via difficultyFor), a locked tile shows the chip, tapping it shows the key notice, collecting the key then unlocks it visually.
+   - Update any tests asserting the old recipe tables (late signatures "rectangle/48/6/16" etc.), the 48-tile size ceiling, daily recipe assertions, and the existing face-size floor.
+   - Keep all 355 existing behaviors that don't conflict; the suite must stay fully green.
+
+7) DOCS
+   - Add SLICE-10.md in the repo root documenting the difficulty overhaul: motivation (adult focus), the tier table, lock rules, the tray-overflow safeguard, hint pricing, and a manual QA checklist (play levels 11, 31, 60, 97, 107; check chip legibility and 40px faces on a 320px viewport).
+
+Constraints: everything stays deterministic and seed-derived; no network, no timers, no new dependencies; React re-render cost for 120 tiles is acceptable as-is; do not introduce hidden-kind/mystery tiles in this pass.
+```
+
+Two places where I made a judgment call you may want to overrule: (1) I deferred hidden/fog tiles — biggest difficulty add left on the table, but it destabilizes save validation and the matching rule; better as a follow-up slice. (2) I kept rescue free and undo deep, leaning on hints + board size for pressure rather than punishing aids.

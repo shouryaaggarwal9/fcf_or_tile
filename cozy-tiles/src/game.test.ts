@@ -13,6 +13,10 @@ function makeTile(id: string, kind: TileKind, coveredBy: string[] = []): Tile {
   };
 }
 
+function lockTile(tile: Tile, lockedBy: string[]): Tile {
+  return { ...tile, lockedBy };
+}
+
 describe("tile matching rules", () => {
   it("blocks covered tiles and allows top tiles", () => {
     const game = createGame();
@@ -27,6 +31,56 @@ describe("tile matching rules", () => {
     expect(move).not.toBeNull();
     expect(isSelectable(move!.result, "b0")).toBe(true);
     expect(isSelectable(move!.result, "b1")).toBe(true);
+  });
+
+  it("blocks a locked tile until its key leaves the board, even when uncovered", () => {
+    const game: GameState = {
+      board: [
+        lockTile(makeTile("guarded", "drop"), ["key"]),
+        makeTile("key", "sun"),
+        makeTile("other", "leaf"),
+      ],
+      tray: [],
+      status: "playing",
+    };
+
+    // Uncovered but locked: still not pickable.
+    expect(isSelectable(game, "guarded")).toBe(false);
+    const move = planMove(game, "key");
+    expect(move).not.toBeNull();
+    expect(isSelectable(move!.result, "guarded")).toBe(true);
+  });
+
+  it("requires every key of a multi-locked tile to be collected", () => {
+    const game: GameState = {
+      board: [
+        lockTile(makeTile("guarded", "drop"), ["key-a", "key-b"]),
+        makeTile("key-a", "sun"),
+        makeTile("key-b", "leaf"),
+      ],
+      tray: [],
+      status: "playing",
+    };
+
+    const first = planMove(game, "key-a")!.result;
+    expect(isSelectable(first, "guarded")).toBe(false);
+    const second = planMove(first, "key-b")!.result;
+    expect(isSelectable(second, "guarded")).toBe(true);
+  });
+
+  it("keeps a locked tile covered-blocked after its key is collected", () => {
+    const game: GameState = {
+      board: [
+        lockTile(makeTile("guarded", "drop", ["cover"]), ["key"]),
+        makeTile("cover", "moon"),
+        makeTile("key", "sun"),
+      ],
+      tray: [],
+      status: "playing",
+    };
+
+    const unlocked = planMove(game, "key")!.result;
+    expect(isSelectable(unlocked, "guarded")).toBe(false); // still covered
   });
 
   it("requires every covering tile to be removed", () => {

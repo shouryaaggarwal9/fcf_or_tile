@@ -40,6 +40,22 @@ describe("hints", () => {
     expect(game.status).toBe("won");
   });
 
+  it("never suggests a locked tile on a lock-bearing level", () => {
+    const level = 31;
+    const generated = generateLevel(level);
+    expect(generated.game.board.some((tile) => tile.lockedBy?.length)).toBe(true);
+    let game = generated.game;
+
+    for (let step = 0; step < 300 && game.status === "playing"; step++) {
+      const hint = hintFor(game, level);
+      if (!hint) break;
+      expect(isSelectable(game, hint.id)).toBe(true);
+      game = planMove(game, hint.id)!.result;
+    }
+
+    expect(game.status).toBe("won");
+  });
+
   it("never suggests a tile that cannot be picked", () => {
     // Take a witness tile out of order so the witness no longer applies.
     let game = generateLevel(4).game;

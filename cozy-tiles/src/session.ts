@@ -52,6 +52,23 @@ export const WELCOME_COINS = 100;
 export const WIN_COINS = 20;
 export const UNDO_LIMIT = 48;
 export const MAX_STARS = 3;
+export const HINT_PRICE = 15;
+
+/** Hints cost a small focus tax in Standard Mode; Relaxed Mode keeps them free. */
+export const hintPrice = (session: Session) =>
+  session.settings.relaxed ? 0 : HINT_PRICE;
+
+/** Charges for one hint. A refusal never charges, and Relaxed Mode never does. */
+export function payForHint(session: Session): { session: Session; error: string } {
+  const cost = hintPrice(session);
+  if (session.coins < cost) {
+    return {
+      session,
+      error: `Not enough coins. A hint costs ${HINT_PRICE}, or enable Relaxed Mode in settings.`,
+    };
+  }
+  return { session: { ...session, coins: session.coins - cost, revision: session.revision + 1 }, error: "" };
+}
 
 export function newSession(level = 1): Session {
   return { level, game: generateLevel(level).game, coins: WELCOME_COINS,

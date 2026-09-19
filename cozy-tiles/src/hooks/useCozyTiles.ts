@@ -6,6 +6,7 @@ import {
   exitDaily,
   goToLevel,
   newSession,
+  payForHint,
   pick,
   price,
   purchase,
@@ -278,6 +279,12 @@ export function useCozyTiles() {
       setNotice("Nothing to suggest right now.");
       return;
     }
+    const paid = payForHint(session);
+    if (paid.error) {
+      setNotice(paid.error);
+      return;
+    }
+    commit(paid.session);
     setHintId(hint.id);
     setNotice(hint.safe ? "Highlighted: a safe pick." : "Highlighted: a suggested pick.");
     feedback.hint();
@@ -294,8 +301,12 @@ export function useCozyTiles() {
   }
 
   // A refused tap explains itself through the status line.
-  function blocked() {
-    setNotice("");
+  function blocked(reason: "covered" | "locked") {
+    if (reason === "locked") {
+      setNotice("That tile is guarded — collect its key tile first.");
+    } else {
+      setNotice("");
+    }
   }
 
   function resetProgress() {

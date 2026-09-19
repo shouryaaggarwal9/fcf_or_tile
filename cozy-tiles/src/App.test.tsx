@@ -118,6 +118,7 @@ describe("Cozy Tiles app", () => {
 
     await waitFor(() => expect(tile("t0").className).toContain("hinted"));
     expect(screen.getByRole("status")).toHaveTextContent(/safe pick/i);
+    expect(screen.getByLabelText("85 coins")).toBeInTheDocument();
   });
 
   it("charges coins to undo the last pick after confirmation", async () => {

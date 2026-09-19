@@ -56,8 +56,11 @@ function validateGame(value: unknown, original: GameState): GameState {
     if (!base || ids.has(base.id) || t.x !== base.x || t.y !== base.y || t.layer !== base.layer ||
       JSON.stringify(t.coveredBy) !== JSON.stringify(base.coveredBy) || !TILE_KINDS.includes(t.kind as Tile["kind"])) throw new Error("Invalid tile");
     ids.add(base.id);
+    // Locks are static generator data: always restored from the regenerated
+    // board, never from the save, so a tampered save cannot lift them.
     const tile: Tile = { id: base.id, kind: t.kind as Tile["kind"], x: base.x, y: base.y,
-      layer: base.layer, coveredBy: [...base.coveredBy] };
+      layer: base.layer, coveredBy: [...base.coveredBy],
+      ...(base.lockedBy ? { lockedBy: [...base.lockedBy] } : {}) };
     return tile;
   });
 

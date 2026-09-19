@@ -19,6 +19,10 @@ export type Tile = {
   y: number;
   layer: number;
   coveredBy: string[];
+  /** Key tiles that must leave the board before this tile is pickable.
+   * The same selectability rule as coveredBy, just from tiles anywhere —
+   * locks are static generator data and never change during play. */
+  lockedBy?: string[];
 };
 
 /** A collect objective: win once `collected` reaches `needed`. */
@@ -185,8 +189,22 @@ export function isSelectable(state: GameState, id: string): boolean {
     return false;
   }
 
+  if (tile.lockedBy?.some((keyId) =>
+    state.board.some((item) => item.id === keyId),
+  )) {
+    return false;
+  }
+
   return !tile.coveredBy.some((coverId) =>
     state.board.some((item) => item.id === coverId),
+  );
+}
+
+/** True while at least one of the tile's key tiles is still on the board. */
+export function isLocked(state: GameState, id: string): boolean {
+  const tile = state.board.find((item) => item.id === id);
+  return Boolean(
+    tile?.lockedBy?.some((keyId) => state.board.some((item) => item.id === keyId)),
   );
 }
 

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import App from "./App";
 import { __resetPwaStub } from "./test/pwaRegisterStub";
 import { generateLevel } from "./levels";
-import { newSession } from "./session";
+import { newSession, pick } from "./session";
 import { saveSession } from "./sessionStorage";
 import { LABELS } from "./symbols";
 
@@ -83,5 +83,66 @@ describe("objectives in the app", () => {
       ).toBeInTheDocument(),
     );
     expect(screen.getByText(/picks ran out/)).toBeInTheDocument();
+  });
+});
+
+function tileElement(id: string) {
+  const element = document.querySelector<HTMLButtonElement>(`[data-tile-id="${id}"]`);
+  if (!element) throw new Error(`Tile ${id} is not on the board`);
+  return element;
+}
+
+describe("key tiles in the app", () => {
+  it("shows the lock chip and explains the refusal", async () => {
+    const user = userEvent.setup();
+    const level = 31;
+    const generated = generateLevel(level);
+    const lockedTile = generated.game.board.find((tile) => tile.lockedBy?.length)!;
+    expect(lockedTile).toBeDefined();
+    saveSession(
+      { ...newSession(level), rewardedThrough: level - 1 },
+      window.localStorage,
+    );
+    render(<App />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: `Level ${level}` })).toBeInTheDocument(),
+    );
+
+    const locked = tileElement(lockedTile.id);
+    expect(locked.querySelector(".tile-lock")).not.toBeNull();
+    expect(locked).toHaveAttribute("aria-disabled", "true");
+    expect(locked).toHaveAccessibleName(/, locked$/);
+    expect(screen.getByText(/Key tiles unlock/)).toBeInTheDocument();
+
+    // The guard explains itself, separate from a covered tap.
+    await user.click(locked);
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(/collect its key tile/i),
+    );
+  });
+
+  it("lifts the guard once the key tile is collected", async () => {
+    const level = 31;
+    const generated = generateLevel(level);
+    const lockedTile = generated.game.board.find((tile) => tile.lockedBy?.length)!;
+    const keyTile = generated.game.board.find(
+      (tile) => tile.id === lockedTile.lockedBy![0],
+    )!;
+    let session = newSession(level);
+    for (const id of generated.solution) {
+      const picked = pick(session, id);
+      if (!picked) break;
+      session = picked.session;
+      if (id === keyTile.id) break;
+    }
+    expect(session.game.board.some((tile) => tile.id === keyTile.id)).toBe(false);
+    saveSession({ ...session, rewardedThrough: level - 1 }, window.localStorage);
+
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: `Level ${level}` })).toBeInTheDocument(),
+    );
+    expect(tileElement(lockedTile.id).querySelector(".tile-lock")).toBeNull();
   });
 });

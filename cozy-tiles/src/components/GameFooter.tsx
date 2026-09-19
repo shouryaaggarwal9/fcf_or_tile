@@ -1,4 +1,4 @@
-import { BOOSTERS, BOOSTER_ORDER, price, unavailable } from "../session";
+import { BOOSTERS, BOOSTER_ORDER, hintPrice, price, unavailable } from "../session";
 import type { Session } from "../session";
 import type { Booster } from "../boosters";
 
@@ -58,10 +58,10 @@ export function GameFooter({
             </span>
           </button>
         ))}
-        {/* Hints are guidance, not an economy: always free. */}
+        {/* Hints are guidance, not an economy: always free in Relaxed Mode. */}
         <button className="booster-button" onClick={onHint} disabled={busy}>
           Hint
-          <span className="booster-price">Free</span>
+          <span className="booster-price">{hintPrice(session) || "Free"}</span>
         </button>
       </div>
 

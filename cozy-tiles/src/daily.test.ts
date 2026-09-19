@@ -66,10 +66,12 @@ describe("generated daily puzzles", () => {
       expect(generateDailyPuzzle(day)).toEqual(generated);
       expect(generated.game.board.length % 3).toBe(0);
       expect(generated.game.board.length).toBeGreaterThan(0);
-      expect(generated.game.board.length).toBeLessThanOrEqual(48);
+      expect(generated.game.board.length).toBeLessThanOrEqual(84);
 
       const bounds = boardBounds(generated.game.board);
-      expect((280 * TILE_FACE) / bounds.width).toBeGreaterThanOrEqual(48);
+      expect((280 * TILE_FACE) / bounds.width).toBeGreaterThanOrEqual(
+        bounds.width > 4.5 ? 40 : 48,
+      );
       expect(new Set(generated.game.board.map((tile) => tile.id)).size).toBe(generated.game.board.length);
 
       let game = generated.game;
@@ -90,15 +92,16 @@ describe("generated daily puzzles", () => {
     expect(new Set(days.map(signature)).size).toBeGreaterThan(3);
   });
 
-  it("never schedules objectives on a daily", () => {
+  it("never schedules objectives or locks on a daily", () => {
     for (const day of [0, 7, 8, 15, 16]) {
       const recipe = dailyRecipe(day);
       expect(recipe.objective).toBe("clear");
       expect(recipe.gentle).toBe(false);
+      expect(recipe.locks).toBe(0);
     }
   });
 
-  it("rotates recipes and silhouettes without ever repeating one shape", () => {
+  it("rotates recipes and silhouettes and closes the week with a deep board", () => {
     const recipes = Array.from({ length: 5 }, (_, index) => dailyRecipe(index));
     expect(new Set(recipes.map((recipe) => recipe.tiles)).size).toBe(5);
     const shapes = new Set(
@@ -106,5 +109,11 @@ describe("generated daily puzzles", () => {
     );
     expect(shapes.size).toBe(6);
     expect(() => dailyRecipe(1.5)).toThrow();
+
+    const deep = dailyRecipe(6); // dayNumber % 7 === 6
+    expect(deep.tiles).toBe(84);
+    expect(deep.shape).toBe("tower");
+    expect(generateDailyPuzzle(6).game.board).toHaveLength(84);
+    expect(generateDailyPuzzle(13).game.board).toHaveLength(84);
   });
 });

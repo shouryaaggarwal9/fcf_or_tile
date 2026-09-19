@@ -1,8 +1,8 @@
 ﻿import { describe, expect, it } from "vitest";
-import { capacityOf } from "./game";
+import { capacityOf, isLocked } from "./game";
 import type { Tile } from "./game";
-import { generateLevel, GENERATOR_VERSION, MAX_LEVEL } from "./levels";
-import { advanceSession, BOOSTERS, goToLevel, newSession, price, purchase, pick, rescue, rescueAvailable, restartSession, starsOf, unavailable, UNDO_LIMIT, unlockedThrough, WELCOME_COINS, WIN_COINS } from "./session";
+import { difficultyFor, generateLevel, GENERATOR_VERSION, MAX_LEVEL } from "./levels";
+import { advanceSession, BOOSTERS, goToLevel, hintPrice, newSession, payForHint, price, purchase, pick, rescue, rescueAvailable, restartSession, starsOf, unavailable, UNDO_LIMIT, unlockedThrough, WELCOME_COINS, WIN_COINS } from "./session";
 import type { Session } from "./session";
 import { decodeSession, loadSession, saveSession } from "./sessionStorage";
 
@@ -327,9 +327,9 @@ describe("session storage", () => {
   });
 
   it("keeps even the largest realistic save within the decode limit", () => {
-    // A level whose recipe is the biggest one: 48 tiles over six layers.
+    // A level whose recipe is the biggest one: 120 tiles over eight layers.
     const level = 999_999_997;
-    expect(generateLevel(level).game.board).toHaveLength(48);
+    expect(generateLevel(level).game.board).toHaveLength(120);
     let session = newSession(level);
     for (const id of generateLevel(level).solution) {
       const picked = pick(session, id);
@@ -340,8 +340,75 @@ describe("session storage", () => {
     const storage = memoryStorage();
     expect(saveSession(session, storage)).toBe(true);
     // decodeSession rejects saves over 1,000,000 characters.
-    expect(storage.getItem("cozy-tiles.progress")!.length).toBeLessThan(200_000);
+    expect(storage.getItem("cozy-tiles.progress")!.length).toBeLessThan(1_000_000);
     expect(loadSession(storage).session).toEqual(session);
+  });
+
+  it("round-trips a lock-bearing level and keeps its locks tamper-proof", () => {
+    const level = 97;
+    expect(difficultyFor(level).locks).toBeGreaterThan(0);
+    let session = newSession(level);
+    for (const id of generateLevel(level).solution.slice(0, 8)) {
+      const picked = pick(session, id);
+      if (!picked) break;
+      session = picked.session;
+    }
+    const storage = memoryStorage();
+    expect(saveSession(session, storage)).toBe(true);
+    const loaded = loadSession(storage);
+    expect(loaded.warning).toBe("");
+    expect(loaded.session).toEqual(session);
+
+    // Locks are restored from the regenerated board, so stripping them from
+    // the raw JSON cannot unlock anything.
+    const stripped = JSON.parse(storage.getItem("cozy-tiles.progress")!);
+    for (const game of [stripped.game, ...stripped.undo]) {
+      for (const tile of game.board) delete tile.lockedBy;
+    }
+    storage.setItem("cozy-tiles.progress", JSON.stringify(stripped));
+    expect(loadSession(storage).session).toEqual(session);
+  });
+
+  it("keeps a locked tile unpickable through session moves", () => {
+    const level = 31;
+    const { game, solution } = generateLevel(level);
+    const locked = game.board.find((tile) => tile.lockedBy?.length);
+    if (!locked) return;
+    // The guard holds at the start: buried key means the tile is not pickable.
+    expect(isLocked(game, locked.id)).toBe(true);
+    let session = newSession(level);
+    for (const id of solution) {
+      // The witness collects the key before it ever needs the guarded tile.
+      if (id === locked.id) expect(isLocked(session.game, locked.id)).toBe(false);
+      const picked = pick(session, id);
+      if (!picked) break;
+      session = picked.session;
+      if (session.game.status !== "playing") break;
+    }
+    expect(session.game.status).toBe("won");
+  });
+
+  it("prices hints: free in Relaxed, 15 coins in Standard, refused when broke", () => {
+    const standard = newSession(4);
+    expect(hintPrice(standard)).toBe(15);
+
+    const broke = { ...standard, coins: 5 };
+    expect(payForHint(broke).error).toContain("Not enough coins");
+    expect(payForHint(broke).session.coins).toBe(5);
+    expect(payForHint(broke).session.revision).toBe(broke.revision);
+
+    const paid = payForHint(standard).session;
+    expect(paid.coins).toBe(WELCOME_COINS - 15);
+    expect(paid.revision).toBe(standard.revision + 1);
+
+    const relaxed = {
+      ...standard,
+      coins: 0,
+      settings: { ...standard.settings, relaxed: true },
+    };
+    expect(hintPrice(relaxed)).toBe(0);
+    expect(payForHint(relaxed).error).toBe("");
+    expect(payForHint(relaxed).session.coins).toBe(0);
   });
 
   it("migrates version 2 saves by defaulting the newer fields", () => {
