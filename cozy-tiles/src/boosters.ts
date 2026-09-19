@@ -1,4 +1,4 @@
-import { capacityOf, frozenCount, isSolvable, PALETTE, planMove, resolveState, TILE_KINDS, WILD_KIND } from "./game";
+import { capacityOf, planMove, resolveState, TILE_KINDS } from "./game";
 import type { GameState, TileKind } from "./game";
 
 export const BOOSTERS = {
@@ -27,50 +27,21 @@ function clearTiles(state: GameState, ids: Set<string>): GameState {
   });
 }
 
-// The wand may not strand the player either: a rainbow clear shifts a kind's
-// count, so the result must still be finishable.
-function safeClear(state: GameState, ids: Set<string>): GameState | null {
-  const result = clearTiles(state, ids);
-  return result.status === "playing" && !isSolvable(result) ? null : result;
-}
-
 // Which tiles the wand would clear: the same-kind pass prefers whichever symbol
-// the tray holds most of, and otherwise a rainbow joins a held pair.
+// the tray holds most of.
 function wandTargets(state: GameState): Set<string> | null {
   const all = [...state.tray, ...state.board];
   const kinds = [...TILE_KINDS].sort((a, b) =>
     state.tray.filter((t) => t.kind === b).length - state.tray.filter((t) => t.kind === a).length);
   const kind = kinds.find((k) => all.filter((t) => t.kind === k).length >= 3);
-  if (kind) {
-    return new Set(all.filter((t) => t.kind === kind).slice(0, 3).map((t) => t.id));
-  }
-
-  const wild = all.find((t) => t.kind === WILD_KIND);
-  const pair = PALETTE.find(
-    (candidate) => state.tray.filter((t) => t.kind === candidate).length === 2,
-  );
-  if (!wild || !pair) return null;
-  return new Set([
-    ...state.tray.filter((t) => t.kind === pair).map((t) => t.id),
-    wild.id,
-  ]);
+  if (!kind) return null;
+  return new Set(all.filter((t) => t.kind === kind).slice(0, 3).map((t) => t.id));
 }
 
 export function wand(state: GameState): GameState | null {
   if (state.status === "won") return null;
   const ids = wandTargets(state);
-  return ids ? safeClear(state, ids) : null;
-}
-
-/**
- * True when the wand is holding a triple it will not use, because clearing it
- * would leave tiles that can never match. Worth naming, so the refusal does not
- * look like the wand is broken.
- */
-export function wandStrands(state: GameState): boolean {
-  if (state.status === "won") return false;
-  const ids = wandTargets(state);
-  return !!ids && !isSolvable(clearTiles(state, ids));
+  return ids ? clearTiles(state, ids) : null;
 }
 
 // Construct a continuation rather than running an unbounded puzzle search.
@@ -123,9 +94,7 @@ export function shuffle(state: GameState, seed: number): { game: GameState; solu
     const board = state.board.map((t) => ({ ...t, kind: assigned.get(t.id)! }));
     if (board.every((t, index) => t.kind === state.board[index].kind)) continue;
     const game = { ...state, board };
-    // A frozen tile is thawed and collected, so the witness visits it twice.
-    const witness = solution.flatMap((id) =>
-      frozenCount(state.board.find((tile) => tile.id === id)!) > 0 ? [id, id] : [id]);
+    const witness = [...solution];
     let verified = game;
     for (const id of witness) {
       const move = planMove(verified, id);

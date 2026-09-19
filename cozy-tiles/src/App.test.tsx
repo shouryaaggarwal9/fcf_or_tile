@@ -476,23 +476,7 @@ describe("Cozy Tiles app", () => {
     vi.unstubAllGlobals();
   });
 
-  it("explains rainbows on a level that contains them", () => {
-    saveSession(
-      { ...newSession(16), rewardedThrough: 15 },
-      window.localStorage,
-    );
-    render(<App />);
-
-    expect(
-      screen.getByRole("heading", { name: "Level 16" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Rainbow tiles finish any pair/),
-    ).toBeInTheDocument();
-    expect(document.querySelectorAll('[data-kind="wild"]')).toHaveLength(3);
-  });
-
-  it("keeps the plain instruction on ordinary levels", () => {
+  it("keeps the plain instruction on every level", () => {
     render(<App />);
 
     expect(

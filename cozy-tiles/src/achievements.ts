@@ -22,8 +22,6 @@ export type Achievement = {
 export const ACHIEVEMENTS: Achievement[] = [
   { id: "first-steps", label: "First steps", description: "Clear level 1.",
     earned: (session) => session.rewardedThrough >= 1 },
-  { id: "rainbow", label: "Rainbow whisperer", description: "Reach level 16, where rainbows appear.",
-    earned: (session) => session.rewardedThrough >= 16 },
   { id: "full-chapter", label: "Full chapter", description: "Clear all 20 levels of a chapter.",
     earned: (session) => session.rewardedThrough >= 20 },
   { id: "explorer", label: "Wandering explorer", description: "Clear 50 levels.",

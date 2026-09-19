@@ -115,18 +115,6 @@ describe("boosters", () => {
     expect(next.coins).toBe(WELCOME_COINS - BOOSTERS.wand.price);
   });
 
-  it("wand is refused when the clear would strand the level", () => {
-    // 1 sun, 2 leaves and a rainbow: spending the rainbow on the leaves leaves a
-    // single sun that could never match. The wand must spend nothing.
-    const tray = [makeTile("a", "wild"), makeTile("b", "leaf"), makeTile("c", "leaf")];
-    const board = [makeTile("d", "sun")];
-    const session: Session = { ...newSession(4), game: { board, tray, status: "playing" } };
-    const refused = purchase(session, "wand", session.revision);
-    expect(refused.error).toContain("can never match");
-    expect(refused.session.coins).toBe(session.coins);
-    expect(refused.session.game.tray).toHaveLength(3);
-  });
-
   it("wand is refused on a finished level and spends nothing", () => {
     const finished = win(newSession(1));
     const refused = purchase(finished, "wand", finished.revision);
@@ -385,7 +373,7 @@ describe("session storage", () => {
     expect(() => decodeSession(save({ stars: { 1: 7 } }))).toThrow();
   });
 
-  it("round-trips a rainbow level mid-game", () => {
+  it("round-trips a late level mid-game", () => {
     const level = 16;
     let session = newSession(level);
     for (const id of generateLevel(level).solution.slice(0, 8)) {

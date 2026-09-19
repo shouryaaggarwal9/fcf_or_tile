@@ -28,8 +28,6 @@ describe("achievements", () => {
   it("unlock from campaign progress", () => {
     expect(earned(newSession(1), "first-steps")).toBe(false);
     expect(earned({ ...newSession(1), rewardedThrough: 1 }, "first-steps")).toBe(true);
-    expect(earned({ ...newSession(1), rewardedThrough: 15 }, "rainbow")).toBe(false);
-    expect(earned({ ...newSession(1), rewardedThrough: 16 }, "rainbow")).toBe(true);
     expect(earned({ ...newSession(1), rewardedThrough: 19 }, "full-chapter")).toBe(false);
     expect(earned({ ...newSession(1), rewardedThrough: 20 }, "full-chapter")).toBe(true);
     expect(earned({ ...newSession(1), rewardedThrough: 50 }, "explorer")).toBe(true);

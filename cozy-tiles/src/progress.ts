@@ -26,10 +26,7 @@ export function decodeProgress(raw: string): Progress {
     throw new Error("Unsupported save");
   }
   const progress = newProgress(saved.level);
-  // A frozen tile is recorded twice: once to thaw, once to collect.
-  const ceiling = progress.game.board.length +
-    progress.game.board.filter((tile) => (tile.frozen ?? 0) > 0).length;
-  if (saved.moves.length > ceiling) throw new Error("Too many moves");
+  if (saved.moves.length > progress.game.board.length) throw new Error("Too many moves");
   for (const id of saved.moves) {
     if (typeof id !== "string") throw new Error("Invalid tile identity");
     const move = planMove(progress.game, id);

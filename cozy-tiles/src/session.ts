@@ -1,7 +1,7 @@
-import { capacityOf, isSolvable, planMove, resolveState } from "./game";
+import { capacityOf, planMove, resolveState } from "./game";
 import type { GameState } from "./game";
 import { generateDailyPuzzle, generateLevel, isLevelNumber, MAX_LEVEL } from "./levels";
-import { BOOSTERS, BOOSTER_ORDER, shuffle, wand, wandStrands } from "./boosters";
+import { BOOSTERS, BOOSTER_ORDER, shuffle, wand } from "./boosters";
 import type { Booster } from "./boosters";
 import { DAILY_COINS, dayNumber, isConsecutive, isDailyDate } from "./daily";
 
@@ -114,10 +114,6 @@ function record(session: Session): Session {
 export function pick(session: Session, id: string) {
   const move = planMove(session.game, id);
   if (!move) return null;
-  // A clear that would leave the board unfinishable is refused the same way a
-  // covered tile is: a free-choice rainbow can shift a kind's count away from a
-  // multiple of three, and the leftovers would never match.
-  if (move.matchingIds.length > 0 && !isSolvable(move.result)) return null;
   const lost = move.result.status === "lost";
   const next = { ...session, game: move.result,
     undo: [...session.undo, session.game].slice(-UNDO_LIMIT),
@@ -144,26 +140,6 @@ export function restartSession(session: Session): Session {
     game: withSlots(freshGame(session.level, session.daily), session.seventhSlot),
     undo: [], shuffleCount: 0,
     rescues: 0, attempts: 0, usedBooster: false, revision: session.revision + 1 };
-}
-
-/** A live attempt whose remaining tiles can never match again. */
-export const stranded = (session: Session) =>
-  session.game.status === "playing" && !isSolvable(session.game);
-
-/**
- * A save written before the fairness guard can hold a stranded position. Rewind
- * to the newest playable frame so the player keeps their progress; if every
- * frame is stranded, start the attempt over.
- */
-export function recoverStranded(session: Session): Session {
-  if (!stranded(session)) return session;
-  for (let index = session.undo.length - 1; index >= 0; index--) {
-    if (!isSolvable(session.undo[index])) continue;
-    return { ...session,
-      game: resolveState({ ...session.undo[index], capacity: capacityOf(session.game) }),
-      undo: session.undo.slice(0, index), revision: session.revision + 1 };
-  }
-  return restartSession(session);
 }
 
 /** Enters a daily puzzle, setting the campaign attempt aside to restore later. */
@@ -245,9 +221,7 @@ export function purchase(session: Session, action: Booster, expectedRevision: nu
   if (action === "wand") {
     const game = wand(session.game);
     if (!game) {
-      return { session, error: wandStrands(session.game)
-        ? "That triple would leave tiles that can never match. No coins spent."
-        : "No triple is available. No coins spent." };
+      return { session, error: "No triple is available. No coins spent." };
     }
     next.game = game;
     next.undo = [];

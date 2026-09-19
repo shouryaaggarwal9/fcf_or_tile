@@ -26,7 +26,7 @@ describe("hints", () => {
     expect(game.status).toBe("won");
   });
 
-  it("stays safe on a level that contains rainbows", () => {
+  it("stays safe through a whole mid-game level", () => {
     let game = generateLevel(16).game;
     expect(hintFor(game, 16)!.safe).toBe(true);
 

@@ -1,11 +1,11 @@
-import { createGame, PALETTE, planMove, TILE_FACE, WILD_KIND } from "./game";
+import { createGame, PALETTE, planMove, TILE_FACE } from "./game";
 import type { GameState, Goal, MoveLimit, Tile } from "./game";
 
 export const MAX_LEVEL = 1_000_000_000;
-// Bumped whenever layout, shapes, symbol assignment, frozen tiles, or objectives
-// change: a saved board is only valid against the generator that produced it.
-// Version 4 adds frozen tiles and collect / pick-limited objectives.
-export const GENERATOR_VERSION = 4;
+// Bumped whenever layout, shapes, symbol assignment, or objectives change:
+// a saved board is only valid against the generator that produced it.
+// Version 5 removes rainbow and frosted tiles.
+export const GENERATOR_VERSION = 5;
 
 const DIFFICULTY = [
   { through: 3, kinds: 3, layers: 2, tiles: 12 },
@@ -113,25 +113,14 @@ export function difficultyFor(level: number) {
     : level % 2 === 0
       ? "diamond"
       : "rectangle";
-  // Rainbows arrive as a whole triple, first on every fourth level from 16,
-  // then twice on every fourth level from 60.
-  const wilds = level % 4 !== 0 ? 0 : level >= 60 ? 2 : level >= 16 ? 1 : 0;
 
   return {
     ...tier,
     kinds: gentle ? Math.max(3, Math.floor(tier.kinds * 0.7)) : tier.kinds,
     gentle,
     shape,
-    wilds,
-    frozen: frozenFor(level),
     objective: objectiveFor(level),
   };
-}
-
-// Frost starts at level 11 and grows slowly; a gentle puzzle is never iced.
-export function frozenFor(level: number): number {
-  if (level < 11 || level % 8 === 0) return 0;
-  return Math.min(6, 2 + Math.floor((level - 11) / 4));
 }
 
 // Objectives begin after the first tier and never override a gentle level.
@@ -180,9 +169,6 @@ export type Recipe = {
   kinds: number;
   shape: ShapeName;
   gentle: boolean;
-  wilds: number;
-  /** Tiles that must be thawed with one extra pick before they can be collected. */
-  frozen: number;
   objective: ObjectiveKind;
 };
 
@@ -238,30 +224,11 @@ function buildPuzzle(recipe: Recipe, seed: number): { game: GameState; solution:
     const other = Math.floor(random() * (index + 1));
     [palette[index], palette[other]] = [palette[other], palette[index]];
   }
-  // A rainbow group is still a legal triple, so the witness keeps working.
   const groups = Math.floor(board.length / 3);
-  const wildGroups = new Set<number>();
-  if (recipe.wilds > 0) wildGroups.add(0);
-  if (recipe.wilds > 1) wildGroups.add(Math.floor(groups / 2));
   solution.forEach((id, index) => {
     const group = Math.floor(index / 3);
-    board.find((tile) => tile.id === id)!.kind = wildGroups.has(group)
-      ? WILD_KIND
-      : palette[group % recipe.kinds];
+    board.find((tile) => tile.id === id)!.kind = palette[group % recipe.kinds];
   });
-
-  // Frost is chosen from its own stream, and thawing a tile never changes
-  // coverage, so the removal order still holds with a thaw inserted before each
-  // frozen tile's collection.
-  const frozenIds = new Set<string>();
-  const frostCount = Math.min(recipe.frozen, board.length);
-  if (frostCount > 0) {
-    const pickFrozen = seededRandom(hashSeed(`cozy-frozen-${seed}`));
-    const indices = new Set<number>();
-    while (indices.size < frostCount) indices.add(Math.floor(pickFrozen() * board.length));
-    for (const index of indices) frozenIds.add(board[index].id);
-    for (const tile of board) if (frozenIds.has(tile.id)) tile.frozen = 1;
-  }
 
   // A collect goal names one symbol to gather. Its first group is placed near
   // the middle of the witness, so the goal is a genuine shortcut — reachable
@@ -287,9 +254,8 @@ function buildPuzzle(recipe: Recipe, seed: number): { game: GameState; solution:
     goal = { target, needed: board.filter((tile) => tile.kind === target).length, collected: 0 };
   }
 
-  // A frozen tile appears twice in the witness: a thaw, then its collection.
-  const witness: string[] = [];
-  for (const id of solution) witness.push(...(frozenIds.has(id) ? [id, id] : [id]));
+  // The witness is the plain removal order: every pick collects its tile.
+  const witness: string[] = [...solution];
 
   let limit: MoveLimit | undefined;
   if (recipe.objective === "moves") {
@@ -355,10 +321,7 @@ export function dailyRecipe(day: number): Recipe {
     ...base,
     shape: DAILY_SHAPES[positiveMod(day, DAILY_SHAPES.length)],
     gentle: false,
-    // A rainbow day every eighth day, still arriving as a whole triple.
-    wilds: positiveMod(day, 8) === 0 ? 1 : 0,
-    // Dailies stay plain: no frost, no goal, no clock.
-    frozen: 0,
+    // Dailies stay plain: no goal, no clock.
     objective: "clear",
   };
 }

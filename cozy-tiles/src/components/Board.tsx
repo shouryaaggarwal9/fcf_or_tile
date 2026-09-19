@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { isSelectable, TILE_FACE, WILD_KIND, wouldStrand } from "../game";
+import { isSelectable, TILE_FACE } from "../game";
 import type { GameState } from "../game";
 import type { BoardBounds } from "../levels";
 import { LABELS } from "../symbols";
@@ -15,7 +15,7 @@ type BoardProps = {
   hintId: string | null;
   onSelect: (id: string, source: HTMLButtonElement) => void;
   /** Called when a tap is refused, so the game can explain why. */
-  onBlocked: (reason: "covered" | "stranded") => void;
+  onBlocked: (reason: "covered") => void;
 };
 
 export function Board({
@@ -59,24 +59,13 @@ export function Board({
     return () => window.clearTimeout(timer);
   }, [deniedId]);
 
-  function deny(id: string, reason: "covered" | "stranded") {
+  function deny(id: string, reason: "covered") {
     setDeniedId(id);
     feedback.deny();
     onBlocked(reason);
   }
 
-  // Rainbows and frost only need explaining while they are actually in play.
-  const hasWild = [...game.board, ...game.tray].some(
-    (tile) => tile.kind === WILD_KIND,
-  );
-  const hasFrozen = game.board.some((tile) => (tile.frozen ?? 0) > 0);
-  const instruction = [
-    hasWild ? "Rainbow tiles finish any pair." : "",
-    hasFrozen ? "Frozen tiles thaw with one tap, then pick." : "",
-    "Only uncovered tiles can be picked.",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const instruction = "Only uncovered tiles can be picked.";
 
   return (
     <section className="play-area" aria-label="Tile board">
@@ -92,11 +81,7 @@ export function Board({
         >
           {game.board.map((tile) => {
             const selectable = isSelectable(game, tile.id);
-            const frozen = (tile.frozen ?? 0) > 0;
-            // Only a rainbow can shift a count off a multiple of three, so the
-            // fairness check is skipped entirely on ordinary levels.
-            const strand = hasWild && selectable && wouldStrand(game, tile.id);
-            const block = !selectable ? "covered" : strand ? "stranded" : null;
+            const block = selectable ? null : "covered";
 
             const style = {
               left: `${(tile.x / layout.width) * 100}%`,
@@ -115,23 +100,15 @@ export function Board({
                 data-kind={tile.kind}
                 style={style}
                 className={`tile board-tile ${block ? "blocked" : ""} ${
-                  frozen ? "frozen" : ""
-                } ${movingId === tile.id ? "leaving" : ""} ${
-                  hintId === tile.id ? "hinted" : ""
-                } ${deniedId === tile.id ? "denied" : ""}`}
+                  movingId === tile.id ? "leaving" : ""
+                } ${hintId === tile.id ? "hinted" : ""} ${
+                  deniedId === tile.id ? "denied" : ""
+                }`}
                 // Blocked tiles stay tappable so a mis-tap can teach the rule;
                 // aria-disabled keeps that honest for assistive tech.
                 disabled={busy}
                 aria-disabled={block !== null}
-                aria-label={`${LABELS[tile.kind]}, ${
-                  block === "covered"
-                    ? "covered"
-                    : block === "stranded"
-                      ? "would leave no way to finish"
-                      : frozen
-                        ? "frozen"
-                        : "available"
-                }`}
+                aria-label={`${LABELS[tile.kind]}, ${block ? "covered" : "available"}`}
                 onClick={(event) => {
                   if (!block) onSelect(tile.id, event.currentTarget);
                   else deny(tile.id, block);

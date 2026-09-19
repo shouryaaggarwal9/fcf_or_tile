@@ -9,7 +9,6 @@ import {
   pick,
   price,
   purchase,
-  recoverStranded,
   rescue as rescueMove,
   rescueAvailable,
   restartSession,
@@ -33,12 +32,7 @@ const HINT_DURATION = 4000;
 // All session state and the move/booster workflow, with no markup. Components
 // stay presentational so they can be tested through the rendered game.
 export function useCozyTiles() {
-  const [loaded] = useState(() => {
-    const result = loadSession();
-    // A save from before the fairness guard may hold an unfinishable position.
-    const session = recoverStranded(result.session);
-    return { ...result, session, recovered: session !== result.session };
-  });
+  const [loaded] = useState(() => loadSession());
   const [session, setSession] = useState(loaded.session);
   const [game, setGame] = useState(loaded.session.game);
   const [saveWarning, setSaveWarning] = useState(loaded.warning);
@@ -47,10 +41,7 @@ export function useCozyTiles() {
   );
   const [pending, setPending] = useState<Booster | null>(null);
   const [confirmRestart, setConfirmRestart] = useState(false);
-  // A recovered save explains itself once, as the first thing on the status line.
-  const [notice, setNotice] = useState(loaded.recovered
-    ? "That attempt could not be finished, so it was rewound to your last playable pick."
-    : "");
+  const [notice, setNotice] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showLevels, setShowLevels] = useState(false);
   const [showDaily, setShowDaily] = useState(false);
@@ -104,7 +95,7 @@ export function useCozyTiles() {
       if (event.key !== SAVE_KEY || !event.newValue) return;
       if (inputLocked.current) return;
       try {
-        const adopted = recoverStranded(decodeSession(event.newValue));
+        const adopted = decodeSession(event.newValue);
         setSession(adopted);
         setGame(adopted.game);
         setLayout(boardBounds(adopted.game.board));
@@ -152,23 +143,6 @@ export function useCozyTiles() {
     // An accepted pick replaces any refusal explanation still on the status line.
     setNotice("");
     const { move, session: next } = picked;
-
-    // A thaw is a state change, not a flight: the tile stays exactly where it is.
-    if (move.thaw) {
-      inputLocked.current = true;
-      commit(next);
-      setBusy(true);
-      setMovingId(null);
-      setHintId(null);
-      feedback.thaw();
-      try {
-        setGame(move.result);
-      } finally {
-        setBusy(false);
-        inputLocked.current = false;
-      }
-      return;
-    }
 
     inputLocked.current = true;
     // Persist the accepted move before animation; interruption resumes its result.
@@ -320,12 +294,8 @@ export function useCozyTiles() {
   }
 
   // A refused tap explains itself through the status line.
-  function blocked(reason: "covered" | "stranded") {
-    setNotice(
-      reason === "stranded"
-        ? "That pick would leave no way to finish. Try another tile."
-        : "",
-    );
+  function blocked() {
+    setNotice("");
   }
 
   function resetProgress() {

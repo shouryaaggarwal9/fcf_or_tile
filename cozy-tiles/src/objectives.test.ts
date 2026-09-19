@@ -7,8 +7,8 @@ import { newSession, pick, unavailable } from "./session";
 import type { Session } from "./session";
 import { decodeSession, loadSession, saveSession } from "./sessionStorage";
 
-function makeTile(id: string, kind: TileKind, frozen = 0): Tile {
-  return { id, kind, x: 0, y: 0, layer: 0, coveredBy: [], ...(frozen ? { frozen } : {}) };
+function makeTile(id: string, kind: TileKind): Tile {
+  return { id, kind, x: 0, y: 0, layer: 0, coveredBy: [] };
 }
 
 function memoryStorage() {
@@ -93,36 +93,6 @@ describe("pick-limited levels", () => {
     };
 
     expect(planMove(game, "sun-3")!.result.status).toBe("won");
-  });
-
-  it("charges a thaw as a pick", () => {
-    const game: GameState = {
-      board: [makeTile("ice", "sun", 1)],
-      tray: [],
-      status: "playing",
-      limit: { limit: 1, used: 0 },
-    };
-
-    const thaw = planMove(game, "ice")!;
-    expect(thaw.thaw).toBe(true);
-    expect(thaw.result.status).toBe("lost");
-  });
-
-  it("does not count a thaw toward a collect goal", () => {
-    const game: GameState = {
-      board: [makeTile("ice", "sun", 1)],
-      tray: [],
-      status: "playing",
-      goal: { target: "sun", needed: 1, collected: 0 },
-    };
-
-    const thaw = planMove(game, "ice")!;
-    expect(thaw.result.goal!.collected).toBe(0);
-    expect(thaw.result.status).toBe("playing");
-
-    const collect = planMove(thaw.result, "ice")!;
-    expect(collect.result.goal!.collected).toBe(1);
-    expect(collect.result.status).toBe("won");
   });
 });
 

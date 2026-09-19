@@ -90,12 +90,12 @@ describe("generated daily puzzles", () => {
     expect(new Set(days.map(signature)).size).toBeGreaterThan(3);
   });
 
-  it("schedules a rainbow day every eighth day", () => {
-    expect(dailyRecipe(8).wilds).toBe(1);
-    expect(dailyRecipe(0).wilds).toBe(1);
-    expect(dailyRecipe(7).wilds).toBe(0);
-    expect(dailyRecipe(15).wilds).toBe(0);
-    expect(dailyRecipe(16).wilds).toBe(1);
+  it("never schedules objectives on a daily", () => {
+    for (const day of [0, 7, 8, 15, 16]) {
+      const recipe = dailyRecipe(day);
+      expect(recipe.objective).toBe("clear");
+      expect(recipe.gentle).toBe(false);
+    }
   });
 
   it("rotates recipes and silhouettes without ever repeating one shape", () => {

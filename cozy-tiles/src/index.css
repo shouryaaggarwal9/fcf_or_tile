@@ -427,24 +427,6 @@ h1 {
   font-size: 0.875rem;
 }
 
-/* Rainbows are the flexible symbol, so they get a warm sheen and a brighter
-   rim to stand out from the ordinary tile faces. */
-[data-kind="wild"] {
-  border-color: #d98a2b;
-  background: linear-gradient(145deg, #fff7d6, #ffe1a1);
-  box-shadow:
-    0 5px 0 #f0b463,
-    0 7px 0 #c07a2c,
-    0 9px 10px #1b234635;
-}
-
-.tray-tile[data-kind="wild"] {
-  box-shadow:
-    inset 0 -3px 0 #f0d79a,
-    0 0 0 1.5px #ffd27d,
-    0 2px 4px #00000030;
-}
-
 /* A non-modal update notice. z-index 15 keeps it below the dialogs (20), so it
    never covers a modal action, and above the board and booster bar. */
 .update-prompt {
@@ -489,23 +471,6 @@ h1 {
 
 .board-tile.blocked {
   filter: brightness(0.73) saturate(0.75);
-}
-
-/* Frost: a translucent glaze over the face, still showing the symbol beneath. */
-.board-tile.frozen {
-  filter: saturate(0.72);
-}
-
-.board-tile.frozen::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(145deg, #eaf7ffc4, #9fd6f5b0 60%, #dff3ffc4);
-  box-shadow:
-    inset 0 0 0 2px #ffffffdd,
-    inset 0 0 10px #ffffff88;
-  pointer-events: none;
 }
 
 .goal-line {

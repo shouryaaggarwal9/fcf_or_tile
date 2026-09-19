@@ -32,10 +32,10 @@ function sameLimit(a?: MoveLimit, b?: MoveLimit): boolean {
 }
 
 function boardKey(board: Tile[]): string {
-  return board.map((tile) => `${tile.id}:${tile.kind}:${tile.frozen ?? 0}`).join(",");
+  return board.map((tile) => `${tile.id}:${tile.kind}`).join(",");
 }
 
-// Two states are equal for validation when their board, tray, frost, progress,
+// Two states are equal for validation when their board, tray, progress,
 // and status match — never key order. Capacity is an attempt setting that can
 // legitimately differ between an old undo frame and the current game (buying the
 // seventh slot changes it), so it is not part of a move's identity.
@@ -55,15 +55,9 @@ function validateGame(value: unknown, original: GameState): GameState {
     const base = original.board.find((tile) => tile.id === t.id);
     if (!base || ids.has(base.id) || t.x !== base.x || t.y !== base.y || t.layer !== base.layer ||
       JSON.stringify(t.coveredBy) !== JSON.stringify(base.coveredBy) || !TILE_KINDS.includes(t.kind as Tile["kind"])) throw new Error("Invalid tile");
-    // Frost only ever melts, so the saved count can never exceed the original.
-    const frozen = t.frozen ?? 0;
-    if (typeof frozen !== "number" || !Number.isInteger(frozen) || frozen < 0 || frozen > (base.frozen ?? 0)) {
-      throw new Error("Invalid frozen state");
-    }
     ids.add(base.id);
     const tile: Tile = { id: base.id, kind: t.kind as Tile["kind"], x: base.x, y: base.y,
       layer: base.layer, coveredBy: [...base.coveredBy] };
-    if (frozen > 0) tile.frozen = frozen;
     return tile;
   });
 
@@ -92,9 +86,8 @@ function validateGame(value: unknown, original: GameState): GameState {
     ...(data.capacity === undefined ? {} : { capacity: data.capacity as 6 | 7 }),
     ...(goal ? { goal } : {}), ...(limit ? { limit } : {}) };
   if (game.tray.length > capacityOf(game)) throw new Error("Tray overflow");
-  // Every move removes exactly three tiles, so the remainder is always a
-  // multiple of three. Per-kind counts are not, because a rainbow can stand in
-  // for a symbol of another kind.
+  // Every move removes three tiles of one kind, so the remainder is always a
+  // multiple of three and so is every kind's remaining count.
   if ((game.board.length + game.tray.length) % 3) throw new Error("Invalid tile count");
   for (const kind of TILE_KINDS) {
     const count = [...game.board, ...game.tray].filter((t) => t.kind === kind).length;
@@ -127,18 +120,11 @@ function validateStars(value: unknown, level: number, rewardedThrough: number): 
   return stars;
 }
 
-// Each frame must follow the last by exactly one legal pick — a collection or a
-// thaw — so a tampered save cannot smuggle in an impossible board.
+// Each frame must follow the last by exactly one legal pick, so a tampered
+// save cannot smuggle in an impossible board.
 function plannedTransition(before: GameState, after: GameState, capacity: 6 | 7) {
   const removed = before.board.filter((tile) => !after.board.some((other) => other.id === tile.id));
-  let id = removed.length === 1 ? removed[0].id : null;
-  if (!id) {
-    const melted = before.board.filter((tile) => {
-      const other = after.board.find((candidate) => candidate.id === tile.id);
-      return other && (tile.frozen ?? 0) !== (other.frozen ?? 0);
-    });
-    if (before.board.length === after.board.length && melted.length === 1) id = melted[0].id;
-  }
+  const id = removed.length === 1 ? removed[0].id : null;
   if (!id) return null;
   const move = planMove({ ...before, capacity }, id);
   return move && sameGame(move.result, after) ? move : null;
@@ -242,7 +228,7 @@ export function decodeSession(raw: string): Session {
     if (migrated.game.status === "won") migrated.rewardedThrough = migrated.level;
     return migrated;
   }
-  // Older versions predate rescue, attempt, star, daily, frozen, objective, and
+  // Older versions predate rescue, attempt, star, daily, objective, and
   // permanent-slot tracking; the missing fields default on the way in.
   if (![2, 3, 4, 5, VERSION].includes(data.version as number) || data.generator !== GENERATOR_VERSION || !isLevelNumber(data.level)) {
     throw new Error("Unsupported save");

@@ -6,7 +6,6 @@ export const LABELS: Record<TileKind, string> = {
   apple: "Apple", orange: "Orange", cherry: "Cherries", mushroom: "Mushroom",
   fish: "Fish", butterfly: "Butterfly", gem: "Gem", cup: "Teacup",
   cloud: "Cloud", bell: "Bell", honey: "Honey", acorn: "Acorn",
-  wild: "Rainbow",
 };
 
 // Original SVG silhouettes, not platform-dependent emoji. Circles are written
@@ -32,6 +31,4 @@ export const EXTRA_SYMBOLS: Partial<Record<TileKind, { color: string; path: stri
   // The inner cell shows as a stroked outline, which the tile renderer draws.
   honey: { color: "#f0b93d", path: "M32 9 48 18v22l-16 9-16-9V18ZM32 19 40 24v12l-8 5-8-5V24Z" },
   acorn: { color: "#c9884f", path: "M16 25 32 12 48 25ZM19 37a13 13 0 1 0 26 0a13 13 0 1 0-26 0Z" },
-  // Rainbow: the flexible symbol, drawn as a four point sparkle.
-  wild: { color: "#e58ad6", path: "M32 5 38 25 58 32 38 39 32 59 26 39 6 32 26 25Z" },
 };
