@@ -333,10 +333,12 @@ h1 {
   border: 1.5px solid #687388;
   border-radius: 13%;
   background: linear-gradient(145deg, #ffffff, #f6f3e8);
+  /* One fixed light direction: a crisp top bevel, then the extruded side
+     below. Every depth shadow in the game points down from this light. */
   box-shadow:
+    inset 0 1.5px 0 #ffffffd9,
     0 5px 0 #a9c5d6,
-    0 7px 0 #536b84,
-    0 9px 10px #1b234635;
+    0 7px 0 #536b84;
   user-select: none;
 }
 
@@ -391,13 +393,47 @@ h1 {
   position: absolute;
   padding: 5px;
   cursor: pointer;
-  /* Layer scale comes from the inline --tile-scale custom property. */
-  transform: scale(var(--tile-scale, 1));
-  transition: transform 90ms ease-out;
+  /* Layer scale comes from the inline --tile-scale custom property; buried
+     tiles sink a little lower via --sink. The soft shadow below casts onto
+     the tiles underneath, so upper layers visibly float above their pile. */
+  transform: scale(var(--tile-scale, 1)) translateY(var(--sink, 0px));
+  box-shadow:
+    inset 0 1.5px 0 #ffffffd9,
+    0 5px 0 #a9c5d6,
+    0 7px 0 #536b84,
+    0 12px 14px -4px #1b234666;
+  transition: transform 90ms ease-out, filter 240ms ease-out;
 }
 
 .board-tile:active:not([aria-disabled="true"]):not(:disabled) {
-  transform: scale(var(--tile-scale, 1)) translateY(3px);
+  transform: scale(var(--tile-scale, 1))
+    translateY(calc(var(--sink, 0px) + 3px));
+}
+
+/* Burial depth: covered tiles sink backwards — darker, duller, and sitting
+   slightly lower with each tile stacked above them. Counting the real board
+   means piles lighten as you dig, so progress is legible at a glance. The
+   generator now staggers every layer sideways, so these steps also expose
+   the rim of each tile beneath the one covering it. */
+.board-tile.buried-1 {
+  --sink: 2px;
+  filter: brightness(0.93) saturate(0.85);
+}
+
+.board-tile.buried-2 {
+  --sink: 4px;
+  filter: brightness(0.86) saturate(0.72);
+}
+
+.board-tile.buried-3 {
+  --sink: 6px;
+  filter: brightness(0.78) saturate(0.6);
+}
+
+/* Locked tiles are not buried — their gate is the key tile, not the stack —
+   so they only lose a little life until the padlock comes off. */
+.board-tile.lock-dim {
+  filter: brightness(0.9) saturate(0.8);
 }
 
 .board {
@@ -469,8 +505,29 @@ h1 {
   margin-top: 0;
 }
 
-.board-tile.blocked {
-  filter: brightness(0.73) saturate(0.75);
+/* The collect objective, marked where it lives — including under other
+   tiles, so players can plan around buried targets instead of discovering
+   them too late. */
+.board-tile.goal-target {
+  outline: 2px solid #ffd27dbb;
+  outline-offset: -2px;
+}
+
+.board-tile.goal-hit {
+  animation: goal-hit 550ms ease-out;
+}
+
+@keyframes goal-hit {
+  0% {
+    transform: scale(calc(var(--tile-scale, 1) * 1.14))
+      translateY(var(--sink, 0px));
+    filter: brightness(1.35) saturate(1.2);
+  }
+
+  100% {
+    transform: scale(var(--tile-scale, 1)) translateY(var(--sink, 0px));
+    filter: brightness(1) saturate(1);
+  }
 }
 
 /* The lock chip sits in the tile's corner. It only ever appears on locked
@@ -496,22 +553,61 @@ h1 {
   height: 82%;
 }
 
-.goal-line {
-  margin: 0 0 8px;
-  padding: 8px 12px;
-  border-radius: 14px;
-  font-size: 0.9375rem;
+/* The objective lives beside the actions, not in the footer small print:
+   icon, count, and pips make the goal glanceable mid-play. */
+.objective-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 2.375rem;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.875rem;
   font-weight: 750;
   color: #fff3d6;
   background: #3a35608c;
   border: 1px solid #ffd27d55;
 }
 
-.goal-line-warning {
+.objective-chip-urgent {
   color: #ffe0c2;
   background: #6b3a2f;
   border-color: #ffb36b;
   animation: tray-alert 1.6s ease-in-out infinite;
+}
+
+.objective-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #fff9eee6;
+  box-shadow: inset 0 -1.5px 0 #c4d7df;
+}
+
+.objective-icon svg {
+  width: 82%;
+  height: 82%;
+}
+
+.goal-pips {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.goal-pip {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1.5px solid #ffd27d99;
+}
+
+.goal-pip-on {
+  background: #ffd27d;
+  border-color: #ffd27d;
 }
 
 .board-tile.leaving {
@@ -614,29 +710,65 @@ h1 {
   }
 }
 
+/* The paid hint must be unmissable: a thick ring plus a breathing lift and
+   glow, held until the player acts. Its two partners ghost alongside it, so
+   the advice shows where the match actually is. */
 @keyframes hint-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 3px #ffdf85;
+    box-shadow:
+      inset 0 1.5px 0 #ffffffd9,
+      0 0 0 4px #ffdf85,
+      0 0 16px 2px #ffd27d66;
+    transform: scale(var(--tile-scale, 1)) translateY(var(--sink, 0px));
   }
 
   50% {
-    box-shadow: 0 0 0 7px #ffdf85dd;
+    box-shadow:
+      inset 0 1.5px 0 #ffffffd9,
+      0 0 0 6px #ffdf85,
+      0 0 28px 9px #ffd27d99;
+    transform: scale(calc(var(--tile-scale, 1) * 1.09))
+      translateY(var(--sink, 0px));
   }
+}
+
+@keyframes ghost-breathe {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+
+  50% {
+    filter: brightness(1.14) saturate(1.15);
+  }
+}
+
+.board-tile.hinted {
+  animation: hint-pulse 900ms ease-in-out infinite;
+}
+
+.board-tile.hint-ghost {
+  outline: 2px dashed #ffd27d;
+  outline-offset: -2px;
+  animation: ghost-breathe 1.2s ease-in-out infinite;
 }
 
 @keyframes deny-shake {
   0%,
   100% {
-    transform: scale(var(--tile-scale, 1)) translateX(0);
+    transform: scale(var(--tile-scale, 1)) translateY(var(--sink, 0px))
+      translateX(0);
   }
 
   30% {
-    transform: scale(var(--tile-scale, 1)) translateX(-4px);
+    transform: scale(var(--tile-scale, 1)) translateY(var(--sink, 0px))
+      translateX(-4px);
   }
 
   65% {
-    transform: scale(var(--tile-scale, 1)) translateX(4px);
+    transform: scale(var(--tile-scale, 1)) translateY(var(--sink, 0px))
+      translateX(4px);
   }
 }
 
@@ -649,10 +781,6 @@ h1 {
   50% {
     box-shadow: 0 0 0 3px #ffb36b88;
   }
-}
-
-.board-tile.hinted {
-  animation: hint-pulse 1s ease-in-out infinite;
 }
 
 .board-tile.denied {
@@ -818,12 +946,106 @@ h1 {
   color: #5b6475;
 }
 
+/* ---- Celebration layer ---------------------------------------------- */
+
+.combo-chip {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  z-index: 15;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  color: #4a2f10;
+  background: #ffdf85;
+  border: 1px solid #ffd27d;
+  box-shadow: 0 6px 18px #1b234650;
+  transform: translateX(-50%);
+  animation: combo-bounce 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+}
+
+.combo-label {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #7a5316;
+}
+
+.combo-count {
+  font-size: 1.125rem;
+  font-weight: 800;
+}
+
+@keyframes combo-bounce {
+  0% {
+    transform: translateX(-50%) scale(0.6);
+    opacity: 0;
+  }
+
+  100% {
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
+  }
+}
+
+.star {
+  display: inline-block;
+}
+
+.star-earned {
+  animation: star-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+}
+
+@keyframes star-pop {
+  0% {
+    transform: scale(0) rotate(-30deg);
+    opacity: 0;
+  }
+
+  70% {
+    transform: scale(1.25) rotate(8deg);
+  }
+
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+.coin-chip-pulse {
+  animation: coin-pulse 500ms ease-out;
+}
+
+@keyframes coin-pulse {
+  0% {
+    transform: scale(1);
+  }
+
+  35% {
+    transform: scale(1.14);
+    box-shadow: 0 0 0 6px #ffd27d40;
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .matching,
   .result-card,
   .board-tile.hinted,
+  .board-tile.hint-ghost,
+  .board-tile.goal-hit,
   .board-tile.denied,
-  .board-tile {
+  .board-tile,
+  .combo-chip,
+  .star-earned,
+  .coin-chip-pulse {
     animation: none;
     transition: none;
   }
@@ -833,7 +1055,7 @@ h1 {
     border-color: #ffb36b;
   }
 
-  .goal-line-warning {
+  .objective-chip-urgent {
     animation: none;
     border-color: #ffb36b;
   }

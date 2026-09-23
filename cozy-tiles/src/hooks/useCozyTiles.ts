@@ -22,13 +22,18 @@ import type { Session, Settings } from "../session";
 import { clearSession, decodeSession, loadSession, saveSession } from "../sessionStorage";
 import { SAVE_KEY } from "../progress";
 import { activeDailyStreak, dailyClearedToday, dailyDateOf } from "../daily";
-import { hintFor } from "../hints";
+import { hintFor, hintKindOf } from "../hints";
 import { LABELS } from "../symbols";
 import { feedback } from "../feedback";
 import type { Booster } from "../boosters";
-import { animateFlight, wait } from "../flight";
+import { animateFlight } from "../flight";
+import type { TileKind } from "../game";
+import { flyCoins, spawnBurst } from "../celebrate";
+import { ComboCounter } from "../combo";
 
-const HINT_DURATION = 4000;
+// Motion preference probed on demand, for effects outside the pick flow.
+const prefersReducedMotion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // All session state and the move/booster workflow, with no markup. Components
 // stay presentational so they can be tested through the rendered game.
@@ -51,6 +56,19 @@ export function useCozyTiles() {
   const [movingId, setMovingId] = useState<string | null>(null);
   const [matchingIds, setMatchingIds] = useState<string[]>([]);
   const [hintId, setHintId] = useState<string | null>(null);
+  // The symbol the hint points at, so the board can ghost its two partners.
+  const [hintKind, setHintKind] = useState<TileKind | null>(null);
+  // The goal kind whose tile was just collected, for a one-shot board pulse.
+  const [goalHit, setGoalHit] = useState<TileKind | null>(null);
+  // Celebration layer: the live consecutive-clear chain, and a counter that
+  // re-pulses the coin chip after each banked win.
+  const [combo, setCombo] = useState(0);
+  const [coinPulse, setCoinPulse] = useState(0);
+  const comboCounter = useRef(new ComboCounter());
+  // What the current win actually paid. Session state alone cannot tell a
+  // first clear from a replay (both arrive with the level already banked), so
+  // the win dialog is told honestly: 20, or a replay note.
+  const winPaid = useRef<number | null>(null);
 
   // Synchronous lock: two rapid taps cannot start overlapping moves.
   const inputLocked = useRef(false);
@@ -64,11 +82,26 @@ export function useCozyTiles() {
 
   useEffect(() => () => feedback.silence(), []);
 
+  // A hint shows the way, so it stays until the player acts on it. Only a
+  // real event — picking, help of any kind, a new hint, a fresh board — clears
+  // it. There is no idle timer: payers are never punished for thinking.
+
+  // Auto-scroll a hinted tile into view. Deep boards can place the paid-for
+  // tile below the fold; the advice must arrive, not just exist. Engines
+  // without scrollIntoView (jsdom) simply skip the scroll.
   useEffect(() => {
     if (!hintId) return;
-    const timer = window.setTimeout(() => setHintId(null), HINT_DURATION);
-    return () => window.clearTimeout(timer);
+    const node = document.querySelector<HTMLElement>(`[data-tile-id="${hintId}"]`);
+    if (typeof node?.scrollIntoView !== "function") return;
+    node.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [hintId]);
+
+  // The goal pulse is a beat, not a state: it fades itself out.
+  useEffect(() => {
+    if (!goalHit) return;
+    const timer = window.setTimeout(() => setGoalHit(null), 600);
+    return () => window.clearTimeout(timer);
+  }, [goalHit]);
 
   useEffect(() => {
     latest.current = session;
@@ -121,6 +154,10 @@ export function useCozyTiles() {
         ? ""
         : "Progress could not be saved. Keep this page open; browser storage may be full or disabled.",
     );
+    // A first clear pays exactly once, on the pick that wins the level.
+    if (next.game.status === "won" && winPaid.current === null) {
+      winPaid.current = next.coins - latest.current.coins;
+    }
     setSession(next);
     feedback.configure(next.settings);
   }
@@ -133,7 +170,12 @@ export function useCozyTiles() {
     setPending(null);
     setConfirmRestart(false);
     setHintId(null);
+    setHintKind(null);
+    setGoalHit(null);
     setNotice("");
+    setCombo(0);
+    comboCounter.current.reset();
+    winPaid.current = null;
   }
 
   async function selectTile(id: string, source: HTMLButtonElement) {
@@ -144,6 +186,8 @@ export function useCozyTiles() {
     // An accepted pick replaces any refusal explanation still on the status line.
     setNotice("");
     const { move, session: next } = picked;
+    // Goal progress as it stood before this pick, to detect a fresh collect.
+    const collectedBefore = session.game.goal?.collected ?? 0;
 
     inputLocked.current = true;
     // Persist the accepted move before animation; interruption resumes its result.
@@ -151,6 +195,8 @@ export function useCozyTiles() {
     setBusy(true);
     setMovingId(id);
     setHintId(null);
+    setHintKind(null);
+    setGoalHit(null);
     feedback.pick();
 
     const reducedMotion = window.matchMedia(
@@ -169,15 +215,34 @@ export function useCozyTiles() {
       }
 
       setGame(move.arrival);
-      setMovingId(null);
+      // A goal tile leaving the board pulses its kind on the board, so the
+      // objective chip visibly ticks down at the moment it happens — whether
+      // or not that pick also completed a triple.
+      if (move.arrival.goal && move.arrival.goal.collected > collectedBefore) {
+        setGoalHit(move.arrival.goal.target);
+      }
 
       if (move.matchingIds.length > 0) {
         setMatchingIds(move.matchingIds);
         feedback.match();
 
-        if (!reducedMotion) {
-          await wait(180);
+        // Celebration layer: a particle pop where the triple cleared, and a
+        // rising note whenever the pick extends a chain of consecutive clears.
+        const slot = slots.current[move.insertionIndex];
+        if (slot) {
+          const rect = slot.getBoundingClientRect();
+          spawnBurst(
+            { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+            "match",
+            reducedMotion,
+          );
         }
+        const streak = comboCounter.current.onMatch();
+        setCombo(streak);
+        if (streak > 1) feedback.combo(streak);
+      } else if (comboCounter.current.onPick()) {
+        // Two idle picks in a row broke the chain; drop the chip.
+        setCombo(0);
       }
 
       setMatchingIds([]);
@@ -212,11 +277,21 @@ export function useCozyTiles() {
     setConfirmRestart(true);
   }
 
+  // When the pick that banks a win pays coins, they fly into the balance chip.
   function advance() {
     if (inputLocked.current) return;
     const next = advanceSession(session);
     if (next === session) return;
+    if (winPaid.current !== null && winPaid.current > 0) {
+      flyCoins(
+        { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+        Math.min(5, Math.ceil(winPaid.current / 4)),
+        prefersReducedMotion(),
+      );
+    }
     commit(next);
+    // Back on the board after a banked win: draw the eye to the new balance.
+    setCoinPulse((count) => count + 1);
     resetView(next);
   }
 
@@ -254,6 +329,10 @@ export function useCozyTiles() {
     commit(next.session);
     setGame(next.session.game);
     setHintId(null);
+    setHintKind(null);
+    // Help of any kind resets the clean-skill match chain.
+    comboCounter.current.reset();
+    setCombo(0);
     if (action === "skip") setLayout(boardBounds(next.session.game.board));
     if (action === "slot") feedback.slot();
     else feedback.booster();
@@ -269,6 +348,9 @@ export function useCozyTiles() {
     commit(next.session);
     setGame(next.session.game);
     setHintId(null);
+    setHintKind(null);
+    comboCounter.current.reset();
+    setCombo(0);
     feedback.slot();
   }
 
@@ -286,6 +368,7 @@ export function useCozyTiles() {
     }
     commit(paid.session);
     setHintId(hint.id);
+    setHintKind(hintKindOf(paid.session.game, hint));
     setNotice(hint.safe ? "Highlighted: a safe pick." : "Highlighted: a suggested pick.");
     feedback.hint();
   }
@@ -377,6 +460,10 @@ export function useCozyTiles() {
     movingId,
     matchingIds,
     hintId,
+    hintKind,
+    goalHit,
+    combo,
+    coinPulse,
     difficulty,
     capacity,
     autoAdvancing,
@@ -384,6 +471,7 @@ export function useCozyTiles() {
     canUndo,
     canRescue,
     stars: starsOf(session),
+    winPaid: winPaid.current,
     statusText,
     objective,
     urgent,

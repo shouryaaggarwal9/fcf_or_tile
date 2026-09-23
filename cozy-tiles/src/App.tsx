@@ -1,4 +1,5 @@
 import { Board } from "./components/Board";
+import { ComboChip } from "./components/ComboChip";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ConfirmPrompt } from "./components/ConfirmPrompt";
 import { DailyDialog } from "./components/DailyDialog";
@@ -12,7 +13,7 @@ import { StatsDialog } from "./components/StatsDialog";
 import { StatusChips } from "./components/StatusChips";
 import { TopBar } from "./components/TopBar";
 import { Tray } from "./components/Tray";
-import { WinDialog } from "./components/WinDialog";
+import { DailyWinDialog, WinDialog } from "./components/WinDialog";
 import { chapterName } from "./chapters";
 import { useCozyTiles } from "./hooks/useCozyTiles";
 import { chapterOf } from "./levels";
@@ -28,6 +29,7 @@ export default function App() {
         coins={tiles.session.coins}
         gentle={tiles.difficulty.gentle}
         busy={tiles.busy}
+        coinPulse={tiles.coinPulse}
         daily={tiles.session.daily}
         streak={tiles.streak}
         onOpenDaily={tiles.openDaily}
@@ -36,6 +38,8 @@ export default function App() {
       />
 
       <StatusChips />
+
+      <ComboChip streak={tiles.combo} />
 
       <Tray
         game={tiles.game}
@@ -50,6 +54,9 @@ export default function App() {
         busy={tiles.busy}
         movingId={tiles.movingId}
         hintId={tiles.hintId}
+        hintKind={tiles.hintKind}
+        goalTarget={tiles.game.goal?.target ?? null}
+        goalHit={tiles.goalHit}
         onSelect={tiles.selectTile}
         onBlocked={tiles.blocked}
       />
@@ -61,6 +68,12 @@ export default function App() {
         notice={tiles.notice}
         statusText={tiles.statusText}
         objective={tiles.objective}
+        goalTarget={tiles.game.goal?.target ?? null}
+        goalRemaining={Math.max(
+          0,
+          (tiles.game.goal?.needed ?? 0) - (tiles.game.goal?.collected ?? 0),
+        )}
+        goalNeeded={tiles.game.goal?.needed ?? 0}
         urgent={tiles.urgent}
         onRequest={tiles.request}
         onHint={tiles.showHint}
@@ -81,15 +94,22 @@ export default function App() {
         />
       )}
 
-      {tiles.game.status === "won" && !tiles.autoAdvancing && (
-        <WinDialog
-          session={tiles.session}
-          stars={tiles.stars}
-          onAdvance={tiles.advance}
-          onRestart={tiles.restart}
-          onExitDaily={tiles.leaveDaily}
-        />
-      )}
+      {tiles.game.status === "won" && !tiles.autoAdvancing &&
+        (tiles.session.daily ? (
+          <DailyWinDialog
+            session={tiles.session}
+            onRestart={tiles.restart}
+            onExitDaily={tiles.leaveDaily}
+          />
+        ) : (
+          <WinDialog
+            session={tiles.session}
+            stars={tiles.stars}
+            winPaid={tiles.winPaid}
+            onAdvance={tiles.advance}
+            onRestart={tiles.restart}
+          />
+        ))}
 
       {tiles.saveWarning && (
         <SaveWarning

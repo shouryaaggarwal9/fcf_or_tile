@@ -4,6 +4,8 @@ type TopBarProps = {
   coins: number;
   gentle: boolean;
   busy: boolean;
+  /** Increments right after a banked win, to pulse the coin chip once. */
+  coinPulse?: number;
   /** Non-null while a daily puzzle is the active board. */
   daily: string | null;
   streak: number;
@@ -18,6 +20,7 @@ export function TopBar({
   coins,
   gentle,
   busy,
+  coinPulse = 0,
   daily,
   streak,
   onOpenDaily,
@@ -39,7 +42,13 @@ export function TopBar({
       </div>
 
       <div className="topbar-controls">
-        <span className="coin-chip" aria-label={`${coins} coins`}>
+        {/* The key re-runs the pop animation on each pulse without keeping
+            extra state; 0 means "never pulsed", so the first paint is calm. */}
+        <span
+          key={coinPulse}
+          className={`coin-chip ${coinPulse > 0 ? "coin-chip-pulse" : ""}`}
+          aria-label={`${coins} coins`}
+        >
           <span aria-hidden="true">◎</span>{" "}
           {new Intl.NumberFormat().format(coins)}
         </span>

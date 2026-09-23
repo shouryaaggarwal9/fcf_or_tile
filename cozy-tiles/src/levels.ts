@@ -4,9 +4,9 @@ import type { GameState, Goal, MoveLimit, Tile } from "./game";
 export const MAX_LEVEL = 1_000_000_000;
 // Bumped whenever layout, shapes, symbol assignment, or objectives change:
 // a saved board is only valid against the generator that produced it.
-// Version 6 is the adult difficulty overhaul: deeper boards, wider shapes,
-// key tiles (locks), and a generator-side tray-overflow safeguard.
-export const GENERATOR_VERSION = 6;
+// Version 7 staggers every layer by a distinct sub-cell offset with tapered
+// counts, so stacks read as visible strata instead of two collapsed planes.
+export const GENERATOR_VERSION = 7;
 
 // The adult curve: boards grow well past the old 48-tile ceiling, and the
 // tier table carries its own lock budget (see buildPuzzle).
@@ -285,6 +285,22 @@ function placeLocks(board: Tile[], witness: string[], count: number, random: () 
   }
 }
 
+// One sub-cell drift per layer, on a 3×3 grid (spacing 0.25, span 0.5) that
+// is walked in a zigzag so every CONSECUTIVE pair of layers slides by a
+// clearly visible quarter-to-half tile — the property that makes tile-club
+// piles readable, since a large part of each buried face stays exposed. The
+// grid guarantees any two layers differ in coordinates, so nothing ever
+// superimposes, and every pair stays within TILE_FACE (0.92) in both axes,
+// so each tile still covers its same-index tile below — coverage chains,
+// and with them solvability, survive by construction. The span matches the
+// old alternation exactly, so silhouettes stay inside the face-size
+// readability budget (six-column shapes: 5.92 + 0.5 = 6.42 → 40px faces).
+const STACK_OFFSETS = [
+  { x: 0, y: 0 }, { x: 0.25, y: 0.5 }, { x: 0.5, y: 0 },
+  { x: 0, y: 0.25 }, { x: 0.5, y: 0.5 }, { x: 0.25, y: 0 },
+  { x: 0, y: 0.5 }, { x: 0.5, y: 0.25 },
+];
+
 function buildPuzzle(recipe: Recipe, seed: number): { game: GameState; solution: string[] } {
   const random = seededRandom(seed);
   const shape = SHAPES[recipe.shape];
@@ -296,16 +312,39 @@ function buildPuzzle(recipe: Recipe, seed: number): { game: GameState; solution:
     return distance(a) - distance(b) || a.y - b.y || a.x - b.x;
   });
 
+  // Layer counts taper upward so the pile reads as a tapered pyramid whose
+  // every ring peeks out (Tile Club reference). The uniform split is shaved
+  // from the TOP layers and each shaved tile re-seats on a bottom layer, so
+  // the total stays exactly `recipe.tiles`. Every transfer keeps the counts
+  // non-increasing (a tile on layer l always has the same-index tile of
+  // layer l−1 directly beneath it, which is what keeps coverage chains
+  // solvable) and never seats a layer beyond the shape's slot capacity.
+  const base = Math.floor(recipe.tiles / recipe.layers);
+  const remainder = recipe.tiles % recipe.layers;
+  const counts = Array.from({ length: recipe.layers }, (_, layer) =>
+    base + (layer < remainder ? 1 : 0));
+  const capacity = candidates.length;
+  const shave = Math.max(0, Math.min(recipe.layers - 1, Math.floor(base / 2)));
+  for (let step = 0; step < shave; step++) {
+    const from = recipe.layers - 1 - Math.floor(step / 2);
+    const to = Math.floor(step / 2);
+    const canShave = counts[from] > 1 &&
+      (from === recipe.layers - 1 || counts[from] - 1 >= counts[from + 1]);
+    const canSeat = counts[to] < (to === 0 ? capacity : counts[to - 1]);
+    if (from <= to || !canShave || !canSeat) continue;
+    counts[from] -= 1;
+    counts[to] += 1;
+  }
+
   const board: Tile[] = [];
   for (let layer = 0; layer < recipe.layers; layer++) {
-    const count = Math.floor(recipe.tiles / recipe.layers) +
-      (layer < recipe.tiles % recipe.layers ? 1 : 0);
-    for (let index = 0; index < count; index++) {
+    const drift = STACK_OFFSETS[layer % STACK_OFFSETS.length];
+    for (let index = 0; index < counts[layer]; index++) {
       const position = candidates[index];
       board.push({
         id: `l${layer}-${index}`, kind: "sun", layer,
-        x: position.x + (layer % 2) * 0.5,
-        y: position.y + (layer % 2) * 0.5,
+        x: position.x + drift.x,
+        y: position.y + drift.y,
         coveredBy: [],
       });
     }

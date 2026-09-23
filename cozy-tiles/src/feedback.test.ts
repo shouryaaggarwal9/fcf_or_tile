@@ -10,6 +10,21 @@ describe("feedback kit", () => {
     expect(calls).toEqual([[12], [18, 40, 18]]);
   });
 
+  it("climbs the combo arpeggio with the chain and caps it", () => {
+    const calls: Array<number | number[]> = [];
+    const kit = new FeedbackKit(true, true, (pattern) => { calls.push(pattern); return true; });
+    kit.combo(2);
+    kit.combo(9);
+    expect(calls).toEqual([[14, 36, 14], [14, 36, 14]]);
+  });
+
+  it("chimes each star arrival", () => {
+    const calls: Array<number | number[]> = [];
+    const kit = new FeedbackKit(true, true, (pattern) => { calls.push(pattern); return true; });
+    kit.stars();
+    expect(calls).toEqual([[12, 36, 12]]);
+  });
+
   it("skips vibration when disabled and survives a failing API", () => {
     const calls: Array<number | number[]> = [];
     const off = new FeedbackKit(true, false, (pattern) => { calls.push(pattern); return true; });

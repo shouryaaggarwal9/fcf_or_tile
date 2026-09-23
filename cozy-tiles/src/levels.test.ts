@@ -84,6 +84,51 @@ describe("generated levels", () => {
     }
   });
 
+  it("staggers every layer so no two tiles superimpose and no tile floats", () => {
+    // A spread across the recipe space: early tiers, late rotation, deep and
+    // gentle boards, the abyss, and the very last level.
+    for (const level of [2, 5, 15, 31, 45, 60, 96, 97, 5000, 999_999_997]) {
+      const { game } = generateLevel(level);
+      const coords = game.board.map((tile) => `${tile.x},${tile.y}`);
+      // Every layer drifts by a distinct offset, so exact duplicates would
+      // mean two layers collapsed into one visual plane again.
+      expect(new Set(coords).size).toBe(game.board.length);
+      for (const tile of game.board) {
+        if (tile.layer === 0) continue;
+        // Every raised tile must sit on the same-index tile one layer down:
+        // the drift table keeps that pair within overlap range, and the
+        // non-increasing counts guarantee the base tile exists.
+        const index = Number(tile.id.slice(tile.id.indexOf("-") + 1));
+        const base = game.board.find((other) =>
+          other.id === `l${tile.layer - 1}-${index}`);
+        expect(base,
+          `level ${level}: tile ${tile.id} has nothing directly beneath`)
+          .toBeDefined();
+        expect(covers(tile, base!),
+          `level ${level}: tile ${tile.id} floats free of its base`)
+          .toBe(true);
+      }
+    }
+  });
+
+  it("tapers late boards so every layer peeks out from under the one above", () => {
+    for (const level of [45, 97, 5000]) {
+      const { game } = generateLevel(level);
+      const counts = new Map<number, number>();
+      for (const tile of game.board) {
+        counts.set(tile.layer, (counts.get(tile.layer) ?? 0) + 1);
+      }
+      const layers = [...counts.keys()].sort((a, b) => a - b);
+      expect(layers.length).toBeGreaterThan(2);
+      for (let index = 1; index < layers.length; index++) {
+        // Non-increasing upward keeps the pile pyramid-shaped; the strict
+        // drop at the top proves the taper actually happened.
+        expect(counts.get(layers[index])!).toBeLessThanOrEqual(
+          counts.get(layers[index - 1])!);
+      }
+    }
+  });
+
   it("pages levels into chapters that never pass the last level", () => {
     expect(chapterOf(1)).toBe(1);
     expect(chapterOf(20)).toBe(1);
@@ -135,7 +180,8 @@ describe("generated levels", () => {
     expect(difficultyFor(77).tiles).toBe(120);
     expect(difficultyFor(77).shape).toBe("tower");
     expect(difficultyFor(77).locks).toBe(5);
-    expect(difficultyFor(96).tiles).toBe(84);
+    // 96 is a gentle level (96 % 8 === 0), so its deep recipe is eased to 60%.
+    expect(difficultyFor(96).tiles).toBe(51);
     expect(difficultyFor(97).tiles).toBe(120);
     expect(difficultyFor(97).shape).toBe("tower");
     expect(difficultyFor(107).tiles).toBe(120);

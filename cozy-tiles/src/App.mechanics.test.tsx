@@ -47,9 +47,10 @@ describe("objectives in the app", () => {
       expect(screen.getByRole("heading", { name: "Level 15" })).toBeInTheDocument(),
     );
     const goal = generateLevel(15).game.goal!;
-    const line = document.querySelector(".goal-line")!;
-    expect(line).toHaveTextContent(/Collect .* more/);
-    expect(line).toHaveTextContent(LABELS[goal.target]);
+    const chip = document.querySelector(".objective-chip")!;
+    expect(chip).toHaveTextContent(/Collect/);
+    expect(chip).toHaveTextContent(LABELS[goal.target]);
+    expect(chip).toHaveTextContent(`${goal.needed}`);
   });
 
   it("shows the remaining picks on a pick-limited level", async () => {
@@ -60,8 +61,8 @@ describe("objectives in the app", () => {
       expect(screen.getByRole("heading", { name: "Level 20" })).toBeInTheDocument(),
     );
     const limit = generateLevel(20).game.limit!;
-    const line = document.querySelector(".goal-line")!;
-    expect(line).toHaveTextContent(`${limit.limit} moves left`);
+    const chip = document.querySelector(".objective-chip")!;
+    expect(chip).toHaveTextContent(`${limit.limit} moves left`);
   });
 
   it("explains a loss by pick limit", async () => {

@@ -1,6 +1,8 @@
 import { BOOSTERS, BOOSTER_ORDER, hintPrice, price, unavailable } from "../session";
 import type { Session } from "../session";
 import type { Booster } from "../boosters";
+import { LABELS } from "../symbols";
+import { TileIcon } from "./TileIcon";
 
 type GameFooterProps = {
   session: Session;
@@ -10,12 +12,41 @@ type GameFooterProps = {
   statusText: string;
   /** The collect goal or moves left, or empty for a plain clear. */
   objective: string;
+  /** The goal's target symbol and progress, for the objective chip's pips. */
+  goalTarget: string | null;
+  goalRemaining: number;
+  goalNeeded: number;
   /** True when a pick limit is nearly spent. */
   urgent: boolean;
   onRequest: (action: Booster) => void;
   onHint: () => void;
   onRestart: () => void;
 };
+
+/**
+ * Progress pips for a collect goal: filled for tiles already banked, hollow
+ * for the ones still to collect. Coloured pips plus a count means the state
+ * never hangs on colour alone.
+ */
+function GoalPips({
+  remaining,
+  needed,
+}: {
+  remaining: number;
+  needed: number;
+}) {
+  const collected = Math.max(0, needed - remaining);
+  return (
+    <span className="goal-pips" aria-hidden="true">
+      {Array.from({ length: needed }, (_, index) => (
+        <span
+          key={index}
+          className={`goal-pip ${index < collected ? "goal-pip-on" : ""}`}
+        />
+      ))}
+    </span>
+  );
+}
 
 export function GameFooter({
   session,
@@ -24,6 +55,9 @@ export function GameFooter({
   notice,
   statusText,
   objective,
+  goalTarget,
+  goalRemaining,
+  goalNeeded,
   urgent,
   onRequest,
   onHint,
@@ -32,6 +66,26 @@ export function GameFooter({
   return (
     <footer className="game-footer">
       <div className="booster-bar">
+        {objective && (
+          <p className={`objective-chip ${urgent ? "objective-chip-urgent" : ""}`}>
+            <span className="objective-text">{objective}</span>
+            {goalTarget !== null && (
+              <span
+                className="objective-icon"
+                data-kind={goalTarget}
+                title={LABELS[goalTarget as keyof typeof LABELS]}
+              >
+                <TileIcon
+                  kind={goalTarget as Parameters<typeof TileIcon>[0]["kind"]}
+                />
+              </span>
+            )}
+            {goalTarget !== null && goalNeeded > 0 && goalNeeded <= 8 && (
+              <GoalPips remaining={goalRemaining} needed={goalNeeded} />
+            )}
+          </p>
+        )}
+
         {/* Offered only until the upgrade is owned for good. */}
         {capacity === 6 && !session.seventhSlot && (
           <button
@@ -64,12 +118,6 @@ export function GameFooter({
           <span className="booster-price">{hintPrice(session) || "Free"}</span>
         </button>
       </div>
-
-      {objective && (
-        <p className={`goal-line ${urgent ? "goal-line-warning" : ""}`}>
-          {objective}
-        </p>
-      )}
 
       <p role="status" aria-live="polite">
         {notice || statusText}

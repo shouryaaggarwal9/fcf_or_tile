@@ -5,6 +5,11 @@ import { puzzleFor } from "./daily";
 
 export type Hint = { id: string; safe: boolean };
 
+/** The symbol a hint points at, so the board can ghost its two partners. */
+export function hintKindOf(state: GameState, hint: Hint): GameState["board"][number]["kind"] | null {
+  return state.board.find((tile) => tile.id === hint.id)?.kind ?? null;
+}
+
 /**
  * A hint is only called safe when it is proven: either the level's remaining
  * witness still wins from the current position, or the pick completes a triple
