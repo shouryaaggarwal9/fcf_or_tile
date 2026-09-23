@@ -4,6 +4,8 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
 
+// deploy comment
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
