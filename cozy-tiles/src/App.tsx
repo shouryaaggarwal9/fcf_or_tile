@@ -20,6 +20,8 @@ import { feedback } from "./feedback";
 import type { Booster } from "./boosters";
 import { EXTRA_SYMBOLS, LABELS } from "./symbols";
 
+// root folder changed in vercel
+
 // Simple original SVG symbols.
 // Unlike emoji, these look the same across devices.
 function TileIcon({ kind }: { kind: TileKind }) {
